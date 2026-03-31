@@ -16,43 +16,42 @@ function varargout = catan_core(command, varargin)
 %   tf      = catan_core('isLegalAction', action, legalActions)
 %   p       = catan_core('diceProbability', n)
 
-if nargin == 0
-    runGame();
-    return;
-end
-
-switch lower(command)
-    case 'defaultconfig'
-        varargout{1} = defaultConfig();
-    case 'simulategame'
-        varargout{1} = simulateGame(varargin{:});
-    case 'enumeratelegalactions'
-        varargout{1} = enumerateLegalActions(varargin{:});
-    case 'applyaction'
-        varargout{1} = applyAction(varargin{:});
-    case 'checkterminal'
-        [varargout{1}, varargout{2}] = checkTerminal(varargin{:});
-    case 'distributeresources'
-        varargout{1} = distributeResources(varargin{:});
-    case 'rolldice'
-        varargout{1} = rollDice();
-    case 'makeaction'
-        varargout{1} = makeAction(varargin{:});
-    case 'islegalaction'
-        varargout{1} = isLegalAction(varargin{:});
-    case 'diceprobability'
-        varargout{1} = diceProbability(varargin{1});
-    case 'rungame'
+    if nargin == 0
         runGame();
-    case 'runtournament'
-        varargout{1} = runTournament(varargin{:});
-    otherwise
-        error('Unknown catan_core command: %s', command);
-end
+        return;
+    end
+    
+    switch lower(command)
+        case 'defaultconfig'
+            varargout{1} = defaultConfig();
+        case 'simulategame'
+            varargout{1} = simulateGame(varargin{:});
+        case 'enumeratelegalactions'
+            varargout{1} = enumerateLegalActions(varargin{:});
+        case 'applyaction'
+            varargout{1} = applyAction(varargin{:});
+        case 'checkterminal'
+            [varargout{1}, varargout{2}] = checkTerminal(varargin{:});
+        case 'distributeresources'
+            varargout{1} = distributeResources(varargin{:});
+        case 'rolldice'
+            varargout{1} = rollDice();
+        case 'makeaction'
+            varargout{1} = makeAction(varargin{:});
+        case 'islegalaction'
+            varargout{1} = isLegalAction(varargin{:});
+        case 'diceprobability'
+            varargout{1} = diceProbability(varargin{1});
+        case 'rungame'
+            runGame();
+        case 'runtournament'
+            varargout{1} = runTournament(varargin{:});
+        otherwise
+            error('Unknown catan_core command: %s', command);
+    end
 
 end
 
-%% ========================= ENTRY POINT =========================
 
 function runGame()
 %RUNGAME  Main entry point. Edit PARAMS below, then run: catan_core
@@ -61,15 +60,13 @@ function runGame()
 %   'random'      - picks a uniformly random legal action each turn
 %   'heuristic'   - greedy placement scored by production value and diversity
 %   'monte_carlo' - flat Monte Carlo rollouts to evaluate candidate actions
-%   'live'        - you play interactively via keyboard input
+%   'live'        - play interactively via keyboard input
 
-% =========================================================================
 %  PARAMETERS — edit these to configure your game
-% =========================================================================
 
 % Players in turn order. Use any combination of the four types above.
 % Example with you playing: {'random', 'heuristic', 'live'}
-PARAMS.players = {'random', 'heuristic'};
+PARAMS.players = {'random', 'heuristic', 'monte_carlo'};
 
 % Pause after each AI move so you can follow the game step by step.
 % Live player turns always pause for input regardless of this setting.
@@ -93,14 +90,13 @@ PARAMS.mc.opponentRolloutPolicy = 'random';    % policy for opponents in rollout
 % Show the board visualization window.
 PARAMS.showViz = true;
 
-% =========================================================================
 
-config                = defaultConfig();
-config.rngSeed        = PARAMS.rngSeed;
+config   = defaultConfig();
+config.rngSeed = PARAMS.rngSeed;
 config.winSettlements = PARAMS.winSettlements;
-config.maxTurns       = PARAMS.maxTurns;
+config.maxTurns  = PARAMS.maxTurns;
 config.pauseAfterMove = PARAMS.pauseAfterMove;
-config.showViz        = PARAMS.showViz;
+config.showViz      = PARAMS.showViz;
 config.rolloutCount   = PARAMS.mc.rolloutCount;
 config.rolloutHorizon = PARAMS.mc.rolloutHorizon;
 config.mc             = PARAMS.mc;
@@ -177,7 +173,7 @@ config.rolloutHorizon         = 30;
 config.mc.selfRolloutPolicy     = 'heuristic';
 config.mc.opponentRolloutPolicy = 'random';
 % Verbose: set false to suppress per-turn console output (e.g. in tournament).
-config.verbose                  = true;
+config.verbose   = true;
 % Heuristic agent tunable weights (override via config.heuristic.*).
 config.heuristic.wExpectedProduction = 3.0;
 config.heuristic.wResourceNeed       = 1.5;

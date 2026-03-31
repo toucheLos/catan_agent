@@ -1,0 +1,20 @@
+For this project the aim is to create multiple functioning catan agents. 
+Agent 1: A random agent which randomly moves
+Agent 2: A heuristic based agent. This agent will be fixed with multiple 
+heuristics which decide its gameplay. The heuristics will be developed via 
+simplifying the game of catan and progressively adding heuristics as the 
+game becomes more complex. More on this below.
+Agent 3: A monte carlo trained agent. Similar to chess engines, the agent 
+will run monte carlo simulations of the game to see potential and most 
+advantageous situations in future game states. 
+
+Roadmap
+1. Create a simplified game of catan. Omit trading, roads, cities, etc. 
+until you have a model with settlements, resources with chance numbers and 
+die.
+2. Create rules for heuristic agent at this point in the development 
+phases. Build both monte carlo and random agents.
+3. Begin to complicate the game as you upgrade the agents.
+4. Until this point, program in matlab
+
+In the future, I would like to make this a GGP.

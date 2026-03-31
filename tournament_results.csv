@@ -1,0 +1,19 @@
+"P1 Win-Rate Matrix  (row=P1, col=P2)"
+,random,heuristic
+random,--,0.0000
+heuristic,1.0000,--
+
+95 % CI Lower Bound
+,random,heuristic
+random,--,0.0000
+heuristic,1.0000,--
+
+95 % CI Upper Bound
+,random,heuristic
+random,--,0.0000
+heuristic,1.0000,--
+
+Overall Win Rates
+Agent,Win Rate,CI Low,CI High,Wins as P1,Wins as P2,Total Games,N per matchup
+random,0.0000,0.0000,0.0000,0,0,10,5
+heuristic,1.0000,1.0000,1.0000,5,5,10,5

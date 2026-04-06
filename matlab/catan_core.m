@@ -1,124 +1,82 @@
 function varargout = catan_core(command, varargin)
-%CATAN_CORE  Settlements-only Catan game engine (single-file MATLAB module).
+%            robber, ports, maritime trading (single-file MATLAB module).
 %
-% Start a game by running with no arguments:
+% Start a game:
 %   catan_core
 %
-% Or call specific commands:
+% Command API:
 %   config  = catan_core('defaultConfig')
 %   history = catan_core('simulateGame', agentFns, config)
 %   legal   = catan_core('enumerateLegalActions', state, playerId, config)
 %   state   = catan_core('applyAction', state, playerId, action, config)
-%   [done, winnerId] = catan_core('checkTerminal', state, config)
+%   [done,w]= catan_core('checkTerminal', state, config)
 %   state   = catan_core('distributeResources', state, roll, config)
 %   roll    = catan_core('rollDice')
-%   action  = catan_core('makeAction', type, vertexId)
+%   action  = catan_core('makeAction', type, vertexId, edgeId, hexId, targetPlayer, resourceType, resource2)
 %   tf      = catan_core('isLegalAction', action, legalActions)
 %   p       = catan_core('diceProbability', n)
+%   vp      = catan_core('computeVP', state, playerId)
+%   state   = catan_core('autoRobber', state, playerId, config)
+%   results = catan_core('runTournament', agentNames, N, config)
 
     if nargin == 0
         runGame();
         return;
     end
-    
+
     switch lower(command)
-        case 'defaultconfig'
-            varargout{1} = defaultConfig();
-        case 'simulategame'
-            varargout{1} = simulateGame(varargin{:});
-        case 'enumeratelegalactions'
-            varargout{1} = enumerateLegalActions(varargin{:});
-        case 'applyaction'
-            varargout{1} = applyAction(varargin{:});
-        case 'checkterminal'
-            [varargout{1}, varargout{2}] = checkTerminal(varargin{:});
-        case 'distributeresources'
-            varargout{1} = distributeResources(varargin{:});
-        case 'rolldice'
-            varargout{1} = rollDice();
-        case 'makeaction'
-            varargout{1} = makeAction(varargin{:});
-        case 'islegalaction'
-            varargout{1} = isLegalAction(varargin{:});
-        case 'diceprobability'
-            varargout{1} = diceProbability(varargin{1});
-        case 'rungame'
-            runGame();
-        case 'runtournament'
-            varargout{1} = runTournament(varargin{:});
+        case 'defaultconfig',            varargout{1} = defaultConfig();
+        case 'simulategame',             varargout{1} = simulateGame(varargin{:});
+        case 'enumeratelegalactions',    varargout{1} = enumerateLegalActions(varargin{:});
+        case 'applyaction',              varargout{1} = applyAction(varargin{:});
+        case 'checkterminal',            [varargout{1},varargout{2}] = checkTerminal(varargin{:});
+        case 'distributeresources',      varargout{1} = distributeResources(varargin{:});
+        case 'rolldice',                 varargout{1} = rollDice();
+        case 'makeaction',               varargout{1} = makeAction(varargin{:});
+        case 'islegalaction',            varargout{1} = isLegalAction(varargin{:});
+        case 'diceprobability',          varargout{1} = diceProbability(varargin{1});
+        case 'computevp',                varargout{1} = computeVP(varargin{:});
+        case 'autorobber',               varargout{1} = autoRobber(varargin{:});
+        case 'enumeraterobberactions',   varargout{1} = enumerateRobberActions(varargin{:});
+        case 'rungame',                  runGame();
+        case 'runtournament',            varargout{1} = runTournament(varargin{:});
         otherwise
             error('Unknown catan_core command: %s', command);
     end
-
 end
 
+%% ========================= ENTRY POINT =========================
 
 function runGame()
 %RUNGAME  Main entry point. Edit PARAMS below, then run: catan_core
 %
-% Player types:
-%   'random'      - picks a uniformly random legal action each turn
-%   'heuristic'   - greedy placement scored by production value and diversity
-%   'monte_carlo' - flat Monte Carlo rollouts to evaluate candidate actions
-%   'live'        - play interactively via keyboard input
+% Player types: 'random' | 'heuristic' | 'monte_carlo' | 'mcts' | 'live'
 
-%  PARAMETERS — edit these to configure your game
-
-% Players in turn order. Use any combination of the four types above.
-% Example with you playing: {'random', 'heuristic', 'live'}
-PARAMS.players = {'random', 'heuristic', 'monte_carlo'};
-
-% Pause after each AI move so you can follow the game step by step.
-% Live player turns always pause for input regardless of this setting.
+PARAMS.players        = {'heuristic', 'random'};
 PARAMS.pauseAfterMove = true;
+PARAMS.rngSeed        = 42;
+PARAMS.winVP          = 10;
+PARAMS.maxTurns       = 300;
+PARAMS.showViz        = true;
+PARAMS.mc.rolloutCount          = 15;
+PARAMS.mc.rolloutHorizon        = 25;
+PARAMS.mc.selfRolloutPolicy     = 'heuristic';
+PARAMS.mc.opponentRolloutPolicy = 'random';
 
-% RNG seed for reproducibility. Set to 0 for a different board each run.
-PARAMS.rngSeed = 42;
-
-% First player to reach this many settlements wins.
-PARAMS.winSettlements = 8;
-
-% Hard cap on turns to prevent infinite games.
-PARAMS.maxTurns = 200;
-
-% Monte Carlo settings (only matter if 'monte_carlo' is one of the players).
-PARAMS.mc.rolloutCount          = 20;          % rollouts per candidate action
-PARAMS.mc.rolloutHorizon        = 30;          % max simulated turns per rollout
-PARAMS.mc.selfRolloutPolicy     = 'heuristic'; % policy for self during rollouts
-PARAMS.mc.opponentRolloutPolicy = 'random';    % policy for opponents in rollouts
-
-% Show the board visualization window.
-PARAMS.showViz = true;
-
-
-config   = defaultConfig();
-config.rngSeed = PARAMS.rngSeed;
-config.winSettlements = PARAMS.winSettlements;
-config.maxTurns  = PARAMS.maxTurns;
+config               = defaultConfig();
+config.rngSeed       = PARAMS.rngSeed;
+config.winVP         = PARAMS.winVP;
+config.maxTurns      = PARAMS.maxTurns;
 config.pauseAfterMove = PARAMS.pauseAfterMove;
-config.showViz      = PARAMS.showViz;
-config.rolloutCount   = PARAMS.mc.rolloutCount;
+config.showViz       = PARAMS.showViz;
+config.rolloutCount  = PARAMS.mc.rolloutCount;
 config.rolloutHorizon = PARAMS.mc.rolloutHorizon;
-config.mc             = PARAMS.mc;
+config.mc            = PARAMS.mc;
 
 numPlayers = numel(PARAMS.players);
 agentFns   = cell(1, numPlayers);
 for i = 1:numPlayers
-    switch lower(PARAMS.players{i})
-        case 'random'
-            agentFns{i} = @agent_random;
-        case 'heuristic'
-            agentFns{i} = @agent_heuristic;
-        case 'monte_carlo'
-            agentFns{i} = @agent_montecarlo;
-        case 'mcts'
-            agentFns{i} = @agent_mcts;
-        case 'live'
-            agentFns{i} = @agent_live;
-        otherwise
-            error('Unknown player type "%s". Choose from: random, heuristic, monte_carlo, mcts, live.', ...
-                PARAMS.players{i});
-    end
+    agentFns{i} = resolveAgentFn(PARAMS.players{i});
 end
 
 fprintf('\n========================================\n');
@@ -127,7 +85,7 @@ fprintf('========================================\n');
 for i = 1:numPlayers
     fprintf('  Player %d: %s\n', i, PARAMS.players{i});
 end
-fprintf('  Win at:    %d settlements\n', config.winSettlements);
+fprintf('  Win at:    %d VP\n', config.winVP);
 fprintf('  Max turns: %d\n', config.maxTurns);
 fprintf('========================================\n\n');
 
@@ -136,73 +94,73 @@ history = simulateGame(agentFns, config, PARAMS.players);
 fprintf('\n========================================\n');
 fprintf('              GAME OVER\n');
 fprintf('========================================\n');
-if history.finalState.winnerId ~= 0
-    wId = history.finalState.winnerId;
-    fprintf('  Winner: Player %d (%s) with %d settlements!\n', ...
-        wId, PARAMS.players{wId}, history.finalState.players(wId).settlementCount);
+fs = history.finalState;
+if fs.winnerId ~= 0
+    wId = fs.winnerId;
+    fprintf('  Winner: Player %d (%s) with %d VP!\n', ...
+        wId, PARAMS.players{wId}, computeVP(fs, wId));
 else
     fprintf('  No winner — max turns reached.\n');
 end
-fprintf('  Total turns: %d\n', history.finalState.turnIndex);
+fprintf('  Total turns: %d\n', fs.turnIndex);
 fprintf('  Final standings:\n');
 for p = 1:numPlayers
-    fprintf('    P%d (%s): %d VP\n', p, PARAMS.players{p}, ...
-        history.finalState.players(p).victoryPoints);
+    vp = computeVP(fs, p);
+    fprintf('    P%d (%s): %d VP  (S:%d C:%d R:%d)\n', ...
+        p, PARAMS.players{p}, vp, ...
+        fs.players(p).settlementCount, fs.players(p).cityCount, fs.players(p).roadCount);
 end
 fprintf('========================================\n');
 end
 
-%% Configuration
+%% ========================= CONFIGURATION =========================
 
 function config = defaultConfig()
-%DEFAULTCONFIG  Returns a struct of all tunable engine parameters.
-
 config.numPlayers             = 2;
-config.maxTurns               = 200;
-config.winSettlements         = 8;
-config.resourceNames          = {'wood', 'brick', 'sheep', 'wheat', 'ore'};
+config.maxTurns               = 300;
+config.winVP                  = 10;
+config.resourceNames          = {'wood','brick','sheep','wheat','ore'};
+% Build costs as resource vectors [wood brick sheep wheat ore]
 config.buildCosts.settlement  = [1 1 1 1 0];
+config.buildCosts.road        = [1 1 0 0 0];
+config.buildCosts.city        = [0 0 0 2 3];
+config.buildCosts.devCard     = [0 0 1 1 1];
 config.initialResources       = [0 0 0 0 0];
 config.initialFreeSettlements = 2;
 config.enforceDistanceRule    = true;
 config.rngSeed                = 42;
 config.pauseAfterMove         = false;
 config.showViz                = true;
-config.rolloutCount           = 20;
-config.rolloutHorizon         = 30;
+config.rolloutCount           = 15;
+config.rolloutHorizon         = 25;
 config.mc.selfRolloutPolicy     = 'heuristic';
 config.mc.opponentRolloutPolicy = 'random';
-% Verbose: set false to suppress per-turn console output (e.g. in tournament).
-config.verbose   = true;
-% Heuristic agent tunable weights (override via config.heuristic.*).
+config.verbose                = true;
 config.heuristic.wExpectedProduction = 3.0;
 config.heuristic.wResourceNeed       = 1.5;
 config.heuristic.wDiversity          = 1.0;
 config.heuristic.wBlocking           = 0.2;
-% MCTS exploration constant (UCB1).
-config.mcts.C = sqrt(2);
+config.heuristic.wRoad               = 1.8;
+config.heuristic.wCity               = 2.5;
+config.mcts.C                 = sqrt(2);
 end
 
-%% ------------------------- Game Loop -------------------------
+%% ========================= GAME LOOP =========================
 
 function history = simulateGame(agentFns, config, playerNames)
-%SIMULATEGAME  Runs one complete game and returns a history struct.
-
 if nargin < 3 || isempty(playerNames)
-    playerNames = arrayfun(@(p) sprintf('P%d', p), 1:numel(agentFns), 'UniformOutput', false);
+    playerNames = arrayfun(@(p) sprintf('P%d',p), 1:numel(agentFns), 'UniformOutput', false);
 end
 if nargin < 2 || isempty(config)
     config = defaultConfig();
 end
-
 config.numPlayers = numel(agentFns);
-doPause   = isfield(config, 'pauseAfterMove') && config.pauseAfterMove;
-useViz    = isfield(config, 'showViz') && config.showViz;
-doVerbose = ~isfield(config, 'verbose') || config.verbose;
+doPause   = isfield(config,'pauseAfterMove') && config.pauseAfterMove;
+useViz    = isfield(config,'showViz') && config.showViz;
+doVerbose = ~isfield(config,'verbose') || config.verbose;
 
 state = initGame(config);
 
-% Create visualization window before placement so user sees the board.
 fig = [];
 if useViz
     fig = initGameFig(state, config, playerNames);
@@ -210,179 +168,254 @@ end
 
 state = initialPlacement(state, agentFns, config, playerNames, doPause, fig);
 
-history        = struct();
-history.actions = struct('turn', {}, 'player', {}, 'roll', {}, 'type', {}, 'vertexId', {}, 'vp', {});
-history.logs   = {};
+history       = struct();
+history.actions = struct('turn',{},'player',{},'roll',{},'type',{},...
+    'vertexId',{},'edgeId',{},'hexId',{},'targetPlayer',{},...
+    'resourceType',{},'resource2',{},'vp',{});
+history.logs  = {};
 
 while ~state.isTerminal
 
     playerId = state.currentPlayer;
 
+    % Transfer new dev cards to playable at start of player's turn
+    state = advanceDevCards(state, playerId);
+
+    % Roll
     state.lastRoll = rollDice();
-    state = distributeResources(state, state.lastRoll, config);
+    roll           = state.lastRoll;
 
     if doVerbose
         fprintf('----------------------------------------\n');
         fprintf('Turn %d | Player %d (%s) | Roll: %d\n', ...
-            state.turnIndex, playerId, playerNames{playerId}, state.lastRoll);
+            state.turnIndex, playerId, playerNames{playerId}, roll);
         printPlayerResources(state, playerId, config);
     end
+    history.logs{end+1} = sprintf('Turn %d | P%d rolled %d', ...
+        state.turnIndex, playerId, roll);
 
-    history.logs{end + 1} = sprintf('Turn %d | P%d rolled %d', ...
-        state.turnIndex, playerId, state.lastRoll); %#ok<AGROW>
-
-    legalActions = enumerateLegalActions(state, playerId, config);
-
-    % For live player: highlight legal vertices on the board.
-    if useViz && ishandle(fig) && strcmp(playerNames{playerId}, 'live')
-        highlightLegalActions(fig, legalActions, state);
+    % ---- Robber phase (roll == 7) ----
+    if roll == 7
+        % Discard
+        for p = 1:config.numPlayers
+            if sum(state.players(p).resources) > 7
+                if strcmp(playerNames{p}, 'live')
+                    state = liveDiscard(state, p, config);
+                else
+                    state = autoDiscard(state, p, config);
+                end
+            end
+        end
+        % Move robber
+        robberLegal = enumerateRobberActions(state, playerId, config);
+        if useViz && ishandle(fig) && strcmp(playerNames{playerId},'live')
+            highlightRobberActions(fig, robberLegal, state);
+        end
+        rAction = agentFns{playerId}(state, robberLegal, playerId, config);
+        if ~isLegalAction(rAction, robberLegal)
+            rAction = robberLegal(1);
+        end
+        state = applyAction(state, playerId, rAction, config);
+        logLine = formatActionLog(playerId, playerNames{playerId}, rAction, state, config);
+        if doVerbose, fprintf('%s\n', logLine); end
+        history.logs{end+1} = logLine;
+        history.actions(end+1) = makeHistoryEntry(state, playerId, roll, rAction);
+        if useViz && ishandle(fig)
+            updateGameFig(fig, state, config, playerNames, playerId, logLine, roll);
+        end
+        [done,wId] = checkTerminal(state, config);
+        state.isTerminal = done; state.winnerId = wId;
+        if state.isTerminal, break; end
+    else
+        state = distributeResources(state, roll, config);
     end
 
-    action = agentFns{playerId}(state, legalActions, playerId, config);
+    % ---- Action phase ----
+    state.devCardPlayedThisTurn = false;
 
-    if ~isLegalAction(action, legalActions)
-        action = makeAction('pass', 0);
+    actionCap = 40;
+    for actionNum = 1:actionCap
+        if state.isTerminal, break; end
+
+        legalActions = enumerateLegalActions(state, playerId, config);
+
+        if useViz && ishandle(fig) && strcmp(playerNames{playerId},'live')
+            highlightLegalActions(fig, legalActions, state);
+        end
+
+        action = agentFns{playerId}(state, legalActions, playerId, config);
+        if ~isLegalAction(action, legalActions)
+            action = makeAction('pass', 0);
+        end
+
+        % End turn on pass (when no free roads pending)
+        if strcmp(action.type,'pass') && state.freeRoads == 0
+            break;
+        end
+
+        state = applyAction(state, playerId, action, config);
+
+        logLine = formatActionLog(playerId, playerNames{playerId}, action, state, config);
+        if doVerbose && ~strcmp(action.type,'pass')
+            fprintf('%s\n', logLine);
+        end
+        history.logs{end+1}   = logLine;
+        history.actions(end+1) = makeHistoryEntry(state, playerId, roll, action);
+
+        if useViz && ishandle(fig)
+            updateGameFig(fig, state, config, playerNames, playerId, logLine, roll);
+        end
+
+        [done,wId] = checkTerminal(state, config);
+        state.isTerminal = done; state.winnerId = wId;
+        if state.isTerminal, break; end
+
+        if doPause && ~strcmp(playerNames{playerId},'live') && ~strcmp(action.type,'pass')
+            input('  [Press Enter to continue]','s');
+        end
     end
 
-    state = applyAction(state, playerId, action, config);
+    state.freeRoads = 0; % safety reset
 
-    logLine = sprintf('P%d (%s) -> %s', playerId, playerNames{playerId}, action.type);
-    if strcmp(action.type, 'build_settlement')
-        logLine = sprintf('%s @v%d', logLine, action.vertexId);
-    end
-    logLine = sprintf('%s | VP=%d', logLine, state.players(playerId).victoryPoints);
-    if doVerbose
-        fprintf('%s\n', logLine);
-    end
-
-    history.logs{end + 1} = logLine; %#ok<AGROW>
-    history.actions(end + 1) = struct( ... %#ok<AGROW>
-        'turn',     state.turnIndex, ...
-        'player',   playerId, ...
-        'roll',     state.lastRoll, ...
-        'type',     action.type, ...
-        'vertexId', action.vertexId, ...
-        'vp',       state.players(playerId).victoryPoints);
-
-    % Update visualization.
-    if useViz && ishandle(fig)
-        updateGameFig(fig, state, config, playerNames, playerId, logLine, state.lastRoll);
-    end
-
-    [done, winnerId] = checkTerminal(state, config);
-    state.isTerminal = done;
-    state.winnerId   = winnerId;
-
-    if state.isTerminal
-        break;
-    end
-
-    % Pause after AI moves (live player already paused for keyboard input).
-    if doPause && ~strcmp(playerNames{playerId}, 'live')
-        input('  [Press Enter to continue]', 's');
-    end
+    if state.isTerminal, break; end
 
     state.currentPlayer = mod(playerId, config.numPlayers) + 1;
     state.turnIndex     = state.turnIndex + 1;
 
-    [done, winnerId] = checkTerminal(state, config);
-    state.isTerminal = done;
-    state.winnerId   = winnerId;
+    [done,wId] = checkTerminal(state, config);
+    state.isTerminal = done; state.winnerId = wId;
 end
 
 history.finalState = state;
 end
 
-%% ------------------------- State Initialization -------------------------
+%% ========================= INITIALIZATION =========================
 
 function state = initGame(config)
-%INITGAME  Seeds RNG, builds board, initializes players, sets counters.
-
 rng(config.rngSeed, 'twister');
 
-board        = createCatanBoard();
-numPlayers   = config.numPlayers;
-numResources = numel(config.resourceNames);
+board      = createCatanBoard();
+numP       = config.numPlayers;
+numRes     = numel(config.resourceNames);
+
+emptyDevCards = struct('knight',0,'roadBuilding',0,'yearOfPlenty',0,'monopoly',0,'vpCard',0);
 
 players = repmat(struct( ...
-    'id',              0, ...
-    'resources',       zeros(1, numResources), ...
-    'settlementCount', 0, ...
-    'victoryPoints',   0), 1, numPlayers);
+    'id',0, 'resources',zeros(1,numRes), ...
+    'settlementCount',0, 'cityCount',0, 'roadCount',0, ...
+    'victoryPoints',0, 'knightsPlayed',0, ...
+    'devCards',emptyDevCards, 'newDevCards',emptyDevCards), 1, numP);
 
-for p = 1:numPlayers
+for p = 1:numP
     players(p).id        = p;
     players(p).resources = config.initialResources;
+    players(p).devCards    = emptyDevCards;
+    players(p).newDevCards = emptyDevCards;
 end
 
-state               = struct();
-state.turnIndex     = 1;
-state.currentPlayer = 1;
-state.board         = board;
-state.players       = players;
-state.lastRoll      = 0;
-state.isTerminal    = false;
-state.winnerId      = 0;
+% Build shuffled dev card deck
+deck = [repmat({'knight'},1,14), repmat({'roadBuilding'},1,2), ...
+        repmat({'yearOfPlenty'},1,2), repmat({'monopoly'},1,2), ...
+        repmat({'vpCard'},1,5)];
+deck = deck(randperm(25));
+
+% Find desert hex for initial robber placement
+desertHex = 1;
+for h = 1:numel(board.hexes)
+    if strcmp(board.hexes(h).resourceType,'desert')
+        desertHex = h; break;
+    end
 end
 
-%% ------------------------- Initial Placement -------------------------
+state                     = struct();
+state.turnIndex           = 1;
+state.currentPlayer       = 1;
+state.board               = board;
+state.players             = players;
+state.lastRoll            = 0;
+state.isTerminal          = false;
+state.winnerId            = 0;
+state.robberHex           = desertHex;
+state.freeRoads           = 0;
+state.devCardPlayedThisTurn = false;
+state.devCardDeck         = deck;
+state.longestRoadPlayer   = 0;
+state.largestArmyPlayer   = 0;
+end
+
+%% ========================= INITIAL PLACEMENT =========================
 
 function state = initialPlacement(state, agentFns, config, playerNames, doPause, fig)
-%INITIALPLACEMENT  Each player places K free settlements before the game starts.
-
-P = config.numPlayers;
-K = config.initialFreeSettlements;
+P         = config.numPlayers;
+K         = config.initialFreeSettlements;   % typically 2
 useViz    = ~isempty(fig);
-doVerbose = ~isfield(config, 'verbose') || config.verbose;
+doVerbose = ~isfield(config,'verbose') || config.verbose;
 
 if doVerbose
-    fprintf('=== Initial Placement (%d free settlement(s) each) ===\n', K);
+    fprintf('=== Initial Placement (%d settlements + roads each, snake draft) ===\n', K);
 end
 
-for round = 1:K
-    for p = 1:P
-        legal = enumerateLegalActionsFree(state, config);
+% Snake draft order: round 1 forward, round 2 backward, etc.
+order = [];
+for r = 1:K
+    if mod(r,2) == 1
+        order = [order, 1:P]; %#ok<AGROW>
+    else
+        order = [order, P:-1:1]; %#ok<AGROW>
+    end
+end
 
-        if doVerbose
-            fprintf('  [Round %d] Player %d (%s) placing...\n', round, p, playerNames{p});
-        end
+for idx = 1:numel(order)
+    p            = order(idx);
+    isSecondRound = (idx > P);
 
-        % For live player: highlight legal vertices before they choose.
-        if useViz && ishandle(fig) && strcmp(playerNames{p}, 'live')
-            highlightLegalActions(fig, legal, state);
-        end
+    % --- Place settlement (free) ---
+    legal = enumerateLegalActionsFree(state, config);
+    if useViz && ishandle(fig) && strcmp(playerNames{p},'live')
+        highlightLegalActions(fig, legal, state);
+    end
+    a = agentFns{p}(state, legal, p, config);
+    if ~isLegalAction(a, legal)
+        a = (numel(legal) > 1) * legal(2) + (numel(legal)==1) * makeAction('pass',0);
+        if numel(legal) > 1, a = legal(2); else, a = makeAction('pass',0); end
+    end
+    state = applyActionFree(state, p, a, config);
+    lastVtx = a.vertexId;
 
-        a = agentFns{p}(state, legal, p, config);
+    % In round 2, give starting resources from this settlement
+    if isSecondRound && strcmp(a.type,'build_settlement')
+        state = giveInitialResources(state, p, lastVtx, config);
+    end
 
-        if ~isLegalAction(a, legal)
-            if numel(legal) > 1
-                a = legal(2);
-            else
-                a = makeAction('pass', 0);
+    if doVerbose
+        fprintf('  P%d placed settlement at v%d\n', p, lastVtx);
+    end
+
+    % --- Place initial road (free) adjacent to settlement ---
+    if strcmp(a.type,'build_settlement')
+        roadLegal = enumerateFreeRoadsAt(state, lastVtx);
+        if numel(roadLegal) > 0
+            if useViz && ishandle(fig) && strcmp(playerNames{p},'live')
+                highlightLegalActions(fig, roadLegal, state);
+            end
+            ra = agentFns{p}(state, roadLegal, p, config);
+            if ~isLegalAction(ra, roadLegal)
+                ra = roadLegal(1);
+            end
+            state = applyFreeRoad(state, p, ra);
+            if doVerbose && strcmp(ra.type,'build_road')
+                fprintf('  P%d placed road on edge %d\n', p, ra.edgeId);
             end
         end
+    end
 
-        state = applyActionFree(state, p, a, config);
+    if useViz && ishandle(fig)
+        statusStr = sprintf('Placement: P%d (%s) @v%d', p, playerNames{p}, lastVtx);
+        updateGameFig(fig, state, config, playerNames, p, statusStr, 0);
+    end
 
-        if strcmp(a.type, 'build_settlement')
-            if doVerbose
-                fprintf('    P%d placed settlement at vertex %d\n', p, a.vertexId);
-            end
-            statusStr = sprintf('Placement: P%d (%s) placed @v%d', p, playerNames{p}, a.vertexId);
-        else
-            if doVerbose
-                fprintf('    P%d passed placement\n', p);
-            end
-            statusStr = sprintf('Placement: P%d (%s) passed', p, playerNames{p});
-        end
-
-        if useViz && ishandle(fig)
-            updateGameFig(fig, state, config, playerNames, p, statusStr, 0);
-        end
-
-        if doPause && ~strcmp(playerNames{p}, 'live')
-            input('  [Press Enter to continue]', 's');
-        end
+    if doPause && ~strcmp(playerNames{p},'live')
+        input('  [Press Enter to continue]','s');
     end
 end
 
@@ -392,141 +425,342 @@ end
 end
 
 function legalActions = enumerateLegalActionsFree(state, config)
-%ENUMERATELEGALACTIONSFREE  All legal initial placement actions (no resource cost).
-
 legalActions = makeAction('pass', 0);
 for v = 1:numel(state.board.vertices)
-    if state.board.vertices(v).owner ~= 0
-        continue;
-    end
+    if state.board.vertices(v).owner ~= 0, continue; end
     if config.enforceDistanceRule
-        neighbors = state.board.vertices(v).adjVertexIds;
-        if any([state.board.vertices(neighbors).owner] ~= 0)
-            continue;
-        end
+        nbrs = state.board.vertices(v).adjVertexIds;
+        if any([state.board.vertices(nbrs).owner] ~= 0), continue; end
     end
-    legalActions(end + 1) = makeAction('build_settlement', v); %#ok<AGROW>
+    legalActions(end+1) = makeAction('build_settlement', v); %#ok<AGROW>
 end
 end
 
 function state = applyActionFree(state, playerId, action, config)
-%APPLYACTIONFREE  Place a settlement for free (no resource deduction).
-
-if ~strcmp(action.type, 'build_settlement')
-    return;
-end
+if ~strcmp(action.type,'build_settlement'), return; end
 v = action.vertexId;
-if v < 1 || v > numel(state.board.vertices)
-    return;
-end
-if state.board.vertices(v).owner ~= 0
-    return;
-end
+if v < 1 || v > numel(state.board.vertices), return; end
+if state.board.vertices(v).owner ~= 0, return; end
 if config.enforceDistanceRule
-    neighbors = state.board.vertices(v).adjVertexIds;
-    if any([state.board.vertices(neighbors).owner] ~= 0)
-        return;
-    end
+    nbrs = state.board.vertices(v).adjVertexIds;
+    if any([state.board.vertices(nbrs).owner] ~= 0), return; end
 end
-
-state.board.vertices(v).owner           = playerId;
+state.board.vertices(v).owner          = playerId;
+state.board.vertices(v).isCity         = false;
 state.players(playerId).settlementCount = state.players(playerId).settlementCount + 1;
-state.players(playerId).victoryPoints   = state.players(playerId).settlementCount;
+state.players(playerId).victoryPoints   = computeVP(state, playerId);
 end
 
-%% ------------------------- Core Rules -------------------------
+function state = giveInitialResources(state, playerId, vertexId, config)
+for h = state.board.vertices(vertexId).adjHexIds
+    rType = state.board.hexes(h).resourceType;
+    if strcmp(rType,'desert'), continue; end
+    rIdx = resourceIndex(rType, config.resourceNames);
+    state.players(playerId).resources(rIdx) = state.players(playerId).resources(rIdx) + 1;
+end
+end
+
+function legal = enumerateFreeRoadsAt(state, vertexId)
+legal = makeAction('pass', 0);
+for e = state.board.vertices(vertexId).adjEdgeIds
+    if state.board.edges(e).owner ~= 0, continue; end
+    a = makeAction('build_road'); a.edgeId = e;
+    legal(end+1) = a; %#ok<AGROW>
+end
+end
+
+function state = applyFreeRoad(state, playerId, action)
+if ~strcmp(action.type,'build_road'), return; end
+e = action.edgeId;
+if e < 1 || e > numel(state.board.edges), return; end
+if state.board.edges(e).owner ~= 0, return; end
+state.board.edges(e).owner            = playerId;
+state.players(playerId).roadCount     = state.players(playerId).roadCount + 1;
+end
+
+%% ========================= CORE RULES =========================
 
 function roll = rollDice()
-%ROLLDICE  Rolls two d6 and returns the sum (2..12).
 roll = randi(6) + randi(6);
 end
 
 function state = distributeResources(state, roll, config)
-%DISTRIBUTERESOURCES  Award +1 resource to each settlement on a hex matching roll.
-
+if roll == 7, return; end  % robber; handled separately
 for v = 1:numel(state.board.vertices)
     owner = state.board.vertices(v).owner;
-    if owner == 0
-        continue;
-    end
+    if owner == 0, continue; end
+    mult = 1 + state.board.vertices(v).isCity; % 1 settlement, 2 city
     for h = state.board.vertices(v).adjHexIds
-        if state.board.hexes(h).diceNumber == roll
-            rType = state.board.hexes(h).resourceType;
-            if strcmp(rType, 'desert')
-                continue;
-            end
-            rIdx = resourceIndex(rType, config.resourceNames);
-            state.players(owner).resources(rIdx) = state.players(owner).resources(rIdx) + 1;
-        end
+        if state.board.hexes(h).diceNumber ~= roll, continue; end
+        if h == state.robberHex, continue; end
+        rType = state.board.hexes(h).resourceType;
+        if strcmp(rType,'desert'), continue; end
+        rIdx = resourceIndex(rType, config.resourceNames);
+        state.players(owner).resources(rIdx) = state.players(owner).resources(rIdx) + mult;
     end
 end
 end
+
+% -----------------------------------------------------------------
+%  Legal action enumeration
+% -----------------------------------------------------------------
 
 function legalActions = enumerateLegalActions(state, playerId, config)
-%ENUMERATELEGALACTIONS  Returns pass plus any affordable build_settlement actions.
-
 legalActions = makeAction('pass', 0);
-if ~canAfford(state.players(playerId).resources, config.buildCosts.settlement)
-    return;
-end
-for v = 1:numel(state.board.vertices)
-    if state.board.vertices(v).owner ~= 0
-        continue;
-    end
-    if config.enforceDistanceRule
-        neighbors = state.board.vertices(v).adjVertexIds;
-        if any([state.board.vertices(neighbors).owner] ~= 0)
-            continue;
+player = state.players(playerId);
+
+% When free roads are pending (road-building card), only offer road building
+if state.freeRoads > 0
+    for e = 1:numel(state.board.edges)
+        if canBuildRoadAtEdge(state, playerId, e)
+            a = makeAction('build_road'); a.edgeId = e;
+            legalActions(end+1) = a; %#ok<AGROW>
         end
     end
-    legalActions(end + 1) = makeAction('build_settlement', v); %#ok<AGROW>
-end
+    return;
 end
 
-function state = applyAction(state, playerId, action, config)
-%APPLYACTION  Apply a normal turn action (pass or build settlement).
-
-if strcmp(action.type, 'pass')
-    return;
-end
-if ~strcmp(action.type, 'build_settlement')
-    return;
-end
-v = action.vertexId;
-if v < 1 || v > numel(state.board.vertices)
-    return;
-end
-if state.board.vertices(v).owner ~= 0
-    return;
-end
-if config.enforceDistanceRule
-    neighbors = state.board.vertices(v).adjVertexIds;
-    if any([state.board.vertices(neighbors).owner] ~= 0)
-        return;
+% Build settlement
+if canAfford(player.resources, config.buildCosts.settlement)
+    for v = 1:numel(state.board.vertices)
+        if isLegalSettlement(state, playerId, v, config)
+            legalActions(end+1) = makeAction('build_settlement', v); %#ok<AGROW>
+        end
     end
 end
-cost = config.buildCosts.settlement;
-if ~canAfford(state.players(playerId).resources, cost)
-    return;
+
+% Build road
+if canAfford(player.resources, config.buildCosts.road)
+    for e = 1:numel(state.board.edges)
+        if canBuildRoadAtEdge(state, playerId, e)
+            a = makeAction('build_road'); a.edgeId = e;
+            legalActions(end+1) = a; %#ok<AGROW>
+        end
+    end
 end
 
-state.players(playerId).resources         = state.players(playerId).resources - cost;
-state.board.vertices(v).owner             = playerId;
-state.players(playerId).settlementCount   = state.players(playerId).settlementCount + 1;
-state.players(playerId).victoryPoints     = state.players(playerId).settlementCount;
+% Build city (upgrade own settlement)
+if canAfford(player.resources, config.buildCosts.city)
+    for v = 1:numel(state.board.vertices)
+        if state.board.vertices(v).owner == playerId && ~state.board.vertices(v).isCity
+            legalActions(end+1) = makeAction('build_city', v); %#ok<AGROW>
+        end
+    end
+end
+
+% Buy dev card
+if canAfford(player.resources, config.buildCosts.devCard) && ~isempty(state.devCardDeck)
+    legalActions(end+1) = makeAction('buy_dev_card'); %#ok<AGROW>
+end
+
+% Play dev card (one per turn; not cards bought this same turn)
+if ~state.devCardPlayedThisTurn
+    dc = player.devCards;
+
+    if dc.knight > 0
+        robLegal = enumerateRobberActions(state, playerId, config);
+        for i = 1:numel(robLegal)
+            a = makeAction('play_knight');
+            a.hexId = robLegal(i).hexId;
+            a.targetPlayer = robLegal(i).targetPlayer;
+            legalActions(end+1) = a; %#ok<AGROW>
+        end
+    end
+
+    if dc.roadBuilding > 0
+        legalActions(end+1) = makeAction('play_road_building'); %#ok<AGROW>
+    end
+
+    if dc.yearOfPlenty > 0
+        rNames = config.resourceNames;
+        for r1 = 1:numel(rNames)
+            for r2 = r1:numel(rNames)
+                a = makeAction('play_year_of_plenty');
+                a.resourceType = rNames{r1}; a.resource2 = rNames{r2};
+                legalActions(end+1) = a; %#ok<AGROW>
+            end
+        end
+    end
+
+    if dc.monopoly > 0
+        for ri = 1:numel(config.resourceNames)
+            a = makeAction('play_monopoly');
+            a.resourceType = config.resourceNames{ri};
+            legalActions(end+1) = a; %#ok<AGROW>
+        end
+    end
+end
+
+% Maritime trading
+rates = getTradeRates(state, playerId, config);
+rNames = config.resourceNames;
+for ri = 1:numel(rNames)
+    if player.resources(ri) >= rates(ri)
+        for rj = 1:numel(rNames)
+            if ri == rj, continue; end
+            a = makeAction('maritime_trade');
+            a.resourceType = rNames{ri}; a.resource2 = rNames{rj};
+            legalActions(end+1) = a; %#ok<AGROW>
+        end
+    end
+end
+end
+
+% -----------------------------------------------------------------
+%  Apply action
+% -----------------------------------------------------------------
+
+function state = applyAction(state, playerId, action, config)
+switch action.type
+    case 'pass'
+        % nothing
+    case 'build_settlement'
+        state = applyBuildSettlement(state, playerId, action, config);
+    case 'build_road'
+        state = applyBuildRoad(state, playerId, action, config);
+    case 'build_city'
+        state = applyBuildCity(state, playerId, action, config);
+    case 'buy_dev_card'
+        state = applyBuyDevCard(state, playerId, config);
+    case 'play_road_building'
+        state.devCardPlayedThisTurn = true;
+        state.players(playerId).devCards.roadBuilding = ...
+            state.players(playerId).devCards.roadBuilding - 1;
+        state.freeRoads = 2;
+    case 'play_year_of_plenty'
+        state.devCardPlayedThisTurn = true;
+        state.players(playerId).devCards.yearOfPlenty = ...
+            state.players(playerId).devCards.yearOfPlenty - 1;
+        r1 = resourceIndex(action.resourceType, config.resourceNames);
+        r2 = resourceIndex(action.resource2,    config.resourceNames);
+        state.players(playerId).resources(r1) = state.players(playerId).resources(r1) + 1;
+        state.players(playerId).resources(r2) = state.players(playerId).resources(r2) + 1;
+    case 'play_monopoly'
+        state.devCardPlayedThisTurn = true;
+        state.players(playerId).devCards.monopoly = ...
+            state.players(playerId).devCards.monopoly - 1;
+        rIdx = resourceIndex(action.resourceType, config.resourceNames);
+        for op = 1:numel(state.players)
+            if op == playerId, continue; end
+            stolen = state.players(op).resources(rIdx);
+            state.players(op).resources(rIdx) = 0;
+            state.players(playerId).resources(rIdx) = ...
+                state.players(playerId).resources(rIdx) + stolen;
+        end
+    case 'play_knight'
+        state.devCardPlayedThisTurn = true;
+        state.players(playerId).devCards.knight = ...
+            state.players(playerId).devCards.knight - 1;
+        state.players(playerId).knightsPlayed = ...
+            state.players(playerId).knightsPlayed + 1;
+        state = applyMoveRobber(state, playerId, action, config);
+        state = updateLargestArmy(state);
+    case 'move_robber'
+        state = applyMoveRobber(state, playerId, action, config);
+    case 'maritime_trade'
+        state = applyMaritimeTrade(state, playerId, action, config);
+end
+state = updateVPs(state);
+end
+
+function state = applyBuildSettlement(state, playerId, action, config)
+v = action.vertexId;
+if v < 1 || v > numel(state.board.vertices), return; end
+if state.board.vertices(v).owner ~= 0, return; end
+if config.enforceDistanceRule
+    nbrs = state.board.vertices(v).adjVertexIds;
+    if any([state.board.vertices(nbrs).owner] ~= 0), return; end
+end
+if ~canAfford(state.players(playerId).resources, config.buildCosts.settlement), return; end
+state.players(playerId).resources = ...
+    state.players(playerId).resources - config.buildCosts.settlement;
+state.board.vertices(v).owner  = playerId;
+state.board.vertices(v).isCity = false;
+state.players(playerId).settlementCount = state.players(playerId).settlementCount + 1;
+% Building a settlement can affect longest road (may break opponent's road)
+state = updateLongestRoad(state);
+end
+
+function state = applyBuildRoad(state, playerId, action, config)
+e = action.edgeId;
+if e < 1 || e > numel(state.board.edges), return; end
+if state.board.edges(e).owner ~= 0, return; end
+if ~canBuildRoadAtEdge(state, playerId, e), return; end
+if state.freeRoads > 0
+    state.freeRoads = state.freeRoads - 1;
+else
+    if ~canAfford(state.players(playerId).resources, config.buildCosts.road), return; end
+    state.players(playerId).resources = ...
+        state.players(playerId).resources - config.buildCosts.road;
+end
+state.board.edges(e).owner        = playerId;
+state.players(playerId).roadCount = state.players(playerId).roadCount + 1;
+state = updateLongestRoad(state);
+end
+
+function state = applyBuildCity(state, playerId, action, config)
+v = action.vertexId;
+if v < 1 || v > numel(state.board.vertices), return; end
+if state.board.vertices(v).owner ~= playerId, return; end
+if state.board.vertices(v).isCity, return; end
+if ~canAfford(state.players(playerId).resources, config.buildCosts.city), return; end
+state.players(playerId).resources = ...
+    state.players(playerId).resources - config.buildCosts.city;
+state.board.vertices(v).isCity = true;
+state.players(playerId).settlementCount = state.players(playerId).settlementCount - 1;
+state.players(playerId).cityCount       = state.players(playerId).cityCount + 1;
+end
+
+function state = applyBuyDevCard(state, playerId, config)
+if isempty(state.devCardDeck), return; end
+if ~canAfford(state.players(playerId).resources, config.buildCosts.devCard), return; end
+state.players(playerId).resources = ...
+    state.players(playerId).resources - config.buildCosts.devCard;
+cardType = state.devCardDeck{end};
+state.devCardDeck(end) = [];
+if strcmp(cardType,'vpCard')
+    state.players(playerId).devCards.vpCard = ...
+        state.players(playerId).devCards.vpCard + 1;
+else
+    state.players(playerId).newDevCards.(cardType) = ...
+        state.players(playerId).newDevCards.(cardType) + 1;
+end
+end
+
+function state = advanceDevCards(state, playerId)
+% Move cards bought last turn into the playable hand
+fields = fieldnames(state.players(playerId).newDevCards);
+for i = 1:numel(fields)
+    f = fields{i};
+    state.players(playerId).devCards.(f) = ...
+        state.players(playerId).devCards.(f) + state.players(playerId).newDevCards.(f);
+    state.players(playerId).newDevCards.(f) = 0;
+end
+end
+
+function state = applyMaritimeTrade(state, playerId, action, config)
+rates    = getTradeRates(state, playerId, config);
+giveIdx  = resourceIndex(action.resourceType, config.resourceNames);
+recvIdx  = resourceIndex(action.resource2,    config.resourceNames);
+if giveIdx == recvIdx, return; end
+rate = rates(giveIdx);
+if state.players(playerId).resources(giveIdx) < rate, return; end
+state.players(playerId).resources(giveIdx) = ...
+    state.players(playerId).resources(giveIdx) - rate;
+state.players(playerId).resources(recvIdx) = ...
+    state.players(playerId).resources(recvIdx) + 1;
 end
 
 function [done, winnerId] = checkTerminal(state, config)
-%CHECKTERMINAL  Returns done=true if win or turn cap reached.
-
 done     = false;
 winnerId = 0;
-settlements = [state.players.settlementCount];
-[maxS, maxIdx] = max(settlements);
-if maxS >= config.winSettlements
-    done     = true;
-    winnerId = maxIdx;
-    return;
+winVP    = config.winVP;
+for p = 1:numel(state.players)
+    if state.players(p).victoryPoints >= winVP
+        done     = true;
+        winnerId = p;
+        return;
+    end
 end
 if state.turnIndex > config.maxTurns
     done = true;
@@ -534,46 +768,351 @@ if state.turnIndex > config.maxTurns
 end
 end
 
-%% ------------------------- Action Helpers -------------------------
+%% ========================= ROBBER =========================
 
-function action = makeAction(type, vertexId)
-%MAKEACTION  Constructs an action struct {type, vertexId}.
-if nargin < 2
-    vertexId = 0;
+function legalActions = enumerateRobberActions(state, playerId, config) %#ok<INUSD>
+first = true;
+for h = 1:numel(state.board.hexes)
+    if h == state.robberHex, continue; end
+    playersOnHex = [];
+    for vid = state.board.hexes(h).vertexIds
+        ow = state.board.vertices(vid).owner;
+        if ow ~= 0 && ow ~= playerId && ~ismember(ow, playersOnHex)
+            playersOnHex(end+1) = ow; %#ok<AGROW>
+        end
+    end
+    if isempty(playersOnHex)
+        a = makeAction('move_robber'); a.hexId = h; a.targetPlayer = 0;
+        if first, legalActions = a; first = false;
+        else, legalActions(end+1) = a; end %#ok<AGROW>
+    else
+        for tp = playersOnHex
+            a = makeAction('move_robber'); a.hexId = h; a.targetPlayer = tp;
+            if first, legalActions = a; first = false;
+            else, legalActions(end+1) = a; end %#ok<AGROW>
+        end
+    end
 end
-action = struct('type', type, 'vertexId', vertexId);
+if first
+    % Fallback: move to hex 1 (shouldn't normally be needed)
+    a = makeAction('move_robber'); a.hexId = 1; a.targetPlayer = 0;
+    legalActions = a;
+end
 end
 
-function tf = isLegalAction(action, legalActions)
-%ISLEGALACTION  True if action matches any entry in legalActions.
-tf = false;
-for i = 1:numel(legalActions)
-    if strcmp(action.type, legalActions(i).type) && action.vertexId == legalActions(i).vertexId
-        tf = true;
-        return;
+function state = applyMoveRobber(state, playerId, action, config) %#ok<INUSD>
+h = action.hexId;
+if h < 1 || h > numel(state.board.hexes), return; end
+state.robberHex = h;
+tp = action.targetPlayer;
+if tp ~= 0 && tp ~= playerId
+    res   = state.players(tp).resources;
+    total = sum(res);
+    if total > 0
+        cum  = cumsum(res);
+        r    = randi(total);
+        rIdx = find(cum >= r, 1);
+        state.players(tp).resources(rIdx)         = state.players(tp).resources(rIdx) - 1;
+        state.players(playerId).resources(rIdx)   = state.players(playerId).resources(rIdx) + 1;
     end
 end
 end
 
-function p = diceProbability(n)
-%DICEPROBABILITY  Probability that two d6 sum to n.
-weights = [1 2 3 4 5 6 5 4 3 2 1];
-if n < 2 || n > 12
-    p = 0;
-else
-    p = weights(n - 1) / 36;
+function state = autoRobber(state, playerId, config)
+%AUTOROBBER  Simplified robber for rollouts: move to highest-impact hex.
+legal = enumerateRobberActions(state, playerId, config);
+best  = -inf;
+pick  = legal(1);
+for i = 1:numel(legal)
+    a = legal(i);
+    if a.hexId == 0, continue; end
+    hex  = state.board.hexes(a.hexId);
+    prob = diceProbability(hex.diceNumber);
+    nOpp = 0;
+    for vid = hex.vertexIds
+        ow = state.board.vertices(vid).owner;
+        if ow ~= 0 && ow ~= playerId, nOpp = nOpp + 1; end
+    end
+    sc = prob * nOpp;
+    if sc > best, best = sc; pick = a; end
+end
+state = applyMoveRobber(state, playerId, pick, config);
+state = updateVPs(state);
+end
+
+function state = autoDiscard(state, playerId, config) %#ok<INUSD>
+res   = state.players(playerId).resources;
+total = sum(res);
+if total <= 7, return; end
+toDiscard = floor(total / 2);
+for d = 1:toDiscard
+    [~, idx] = max(res);
+    res(idx) = res(idx) - 1;
+end
+state.players(playerId).resources = res;
+end
+
+function state = liveDiscard(state, playerId, config)
+res   = state.players(playerId).resources;
+total = sum(res);
+nDiscard = floor(total / 2);
+fprintf('\n  *** Player %d must discard %d cards (has %d) ***\n', playerId, nDiscard, total);
+rNames = config.resourceNames;
+for d = 1:nDiscard
+    fprintf('  Resources: ');
+    for i = 1:numel(rNames), fprintf('%s=%d  ', rNames{i}, res(i)); end
+    fprintf('\n');
+    ok = false;
+    while ~ok
+        raw = input('  Discard which resource (name)? ','s');
+        rIdx = find(strcmp(rNames, strtrim(lower(raw))), 1);
+        if ~isempty(rIdx) && res(rIdx) > 0
+            res(rIdx) = res(rIdx) - 1;
+            ok = true;
+        else
+            fprintf('  Invalid. Choose from: %s\n', strjoin(rNames(res>0), ', '));
+        end
+    end
+end
+state.players(playerId).resources = res;
+end
+
+%% ========================= VP / LONGEST ROAD / LARGEST ARMY =========================
+
+function vp = computeVP(state, playerId)
+vp = 0;
+for v = 1:numel(state.board.vertices)
+    if state.board.vertices(v).owner == playerId
+        vp = vp + 1 + state.board.vertices(v).isCity; % 1 settle or 2 city
+    end
+end
+if state.longestRoadPlayer == playerId, vp = vp + 2; end
+if state.largestArmyPlayer == playerId, vp = vp + 2; end
+vp = vp + state.players(playerId).devCards.vpCard;
+end
+
+function state = updateVPs(state)
+for p = 1:numel(state.players)
+    state.players(p).victoryPoints = computeVP(state, p);
 end
 end
 
-%% ------------------------- Utility Helpers -------------------------
+function state = updateLongestRoad(state)
+numP = numel(state.players);
+lens = zeros(1, numP);
+for p = 1:numP
+    lens(p) = computeLongestRoadLen(state, p);
+end
+[maxLen, ~] = max(lens);
+cur = state.longestRoadPlayer;
+if maxLen < 5
+    state.longestRoadPlayer = 0;
+    return;
+end
+if cur ~= 0 && lens(cur) == maxLen
+    return; % current holder keeps (tie)
+end
+if cur == 0
+    for p = 1:numP
+        if lens(p) == maxLen, state.longestRoadPlayer = p; return; end
+    end
+else
+    if maxLen > lens(cur)
+        for p = 1:numP
+            if lens(p) == maxLen, state.longestRoadPlayer = p; return; end
+        end
+    end
+end
+end
+
+function len = computeLongestRoadLen(state, playerId)
+board    = state.board;
+if ~isfield(board,'edges') || isempty(board.edges), len = 0; return; end
+numEdges = numel(board.edges);
+hasPEdge = false;
+for e = 1:numEdges
+    if board.edges(e).owner == playerId, hasPEdge = true; break; end
+end
+if ~hasPEdge, len = 0; return; end
+
+allV = [];
+for e = 1:numEdges
+    if board.edges(e).owner == playerId
+        allV = [allV, board.edges(e).vertexIds]; %#ok<AGROW>
+    end
+end
+startVerts = unique(allV);
+
+len      = 0;
+usedE    = false(1, numEdges);
+for sv = startVerts
+    l = dfsRoad(board, playerId, sv, usedE);
+    if l > len, len = l; end
+end
+end
+
+function len = dfsRoad(board, playerId, v, usedEdges)
+len = 0;
+for e = board.vertices(v).adjEdgeIds
+    if board.edges(e).owner ~= playerId, continue; end
+    if usedEdges(e), continue; end
+    vPair = board.edges(e).vertexIds;
+    nv    = vPair(vPair ~= v);
+    if isempty(nv), continue; end
+    nv    = nv(1);
+    nOwner = board.vertices(nv).owner;
+    if nOwner ~= 0 && nOwner ~= playerId
+        if 1 > len, len = 1; end
+    else
+        usedEdges(e) = true;
+        sl = 1 + dfsRoad(board, playerId, nv, usedEdges);
+        usedEdges(e) = false;
+        if sl > len, len = sl; end
+    end
+end
+end
+
+function state = updateLargestArmy(state)
+numP    = numel(state.players);
+knights = zeros(1, numP);
+for p = 1:numP, knights(p) = state.players(p).knightsPlayed; end
+[maxK, ~] = max(knights);
+cur = state.largestArmyPlayer;
+if maxK < 3, state.largestArmyPlayer = 0; return; end
+if cur ~= 0 && knights(cur) == maxK, return; end
+if cur == 0
+    for p = 1:numP
+        if knights(p) == maxK, state.largestArmyPlayer = p; return; end
+    end
+else
+    if maxK > knights(cur)
+        for p = 1:numP
+            if knights(p) == maxK, state.largestArmyPlayer = p; return; end
+        end
+    end
+end
+end
+
+%% ========================= TRADING =========================
+
+function rates = getTradeRates(state, playerId, config)
+rates = 4 * ones(1, numel(config.resourceNames));
+for v = 1:numel(state.board.vertices)
+    if state.board.vertices(v).owner ~= playerId, continue; end
+    port = state.board.vertices(v).portType;
+    if strcmp(port,'none'), continue; end
+    if strcmp(port,'3to1')
+        rates = min(rates, 3);
+    else
+        % e.g. 'wood2to1' → strip '2to1'
+        rName = port(1:end-4);
+        rIdx  = find(strcmp(config.resourceNames, rName), 1);
+        if ~isempty(rIdx)
+            rates(rIdx) = min(rates(rIdx), 2);
+        end
+    end
+end
+end
+
+%% ========================= ACTION / STATE HELPERS =========================
+
+function action = makeAction(type, vertexId, edgeId, hexId, targetPlayer, resourceType, resource2)
+action.type         = type;
+action.vertexId     = 0;
+action.edgeId       = 0;
+action.hexId        = 0;
+action.targetPlayer = 0;
+action.resourceType = '';
+action.resource2    = '';
+if nargin > 1 && ~isempty(vertexId),     action.vertexId     = vertexId;     end
+if nargin > 2 && ~isempty(edgeId),       action.edgeId       = edgeId;       end
+if nargin > 3 && ~isempty(hexId),        action.hexId        = hexId;        end
+if nargin > 4 && ~isempty(targetPlayer), action.targetPlayer = targetPlayer; end
+if nargin > 5 && ~isempty(resourceType), action.resourceType = resourceType; end
+if nargin > 6 && ~isempty(resource2),    action.resource2    = resource2;    end
+end
+
+function tf = isLegalAction(action, legalActions)
+tf = false;
+for i = 1:numel(legalActions)
+    la = legalActions(i);
+    if ~strcmp(action.type, la.type), continue; end
+    switch action.type
+        case 'pass'
+            tf = true; return;
+        case {'build_settlement','build_city'}
+            if action.vertexId == la.vertexId, tf = true; return; end
+        case 'build_road'
+            if action.edgeId == la.edgeId, tf = true; return; end
+        case {'move_robber','play_knight'}
+            if action.hexId == la.hexId && action.targetPlayer == la.targetPlayer
+                tf = true; return;
+            end
+        case {'buy_dev_card','play_road_building'}
+            tf = true; return;
+        case 'play_year_of_plenty'
+            if strcmp(action.resourceType, la.resourceType) && strcmp(action.resource2, la.resource2)
+                tf = true; return;
+            end
+        case 'play_monopoly'
+            if strcmp(action.resourceType, la.resourceType), tf = true; return; end
+        case 'maritime_trade'
+            if strcmp(action.resourceType, la.resourceType) && strcmp(action.resource2, la.resource2)
+                tf = true; return;
+            end
+    end
+end
+end
+
+function tf = isLegalSettlement(state, playerId, v, config)
+tf = false;
+if state.board.vertices(v).owner ~= 0, return; end
+if config.enforceDistanceRule
+    nbrs = state.board.vertices(v).adjVertexIds;
+    if any([state.board.vertices(nbrs).owner] ~= 0), return; end
+end
+% Must have road connectivity
+for e = state.board.vertices(v).adjEdgeIds
+    if state.board.edges(e).owner == playerId, tf = true; return; end
+end
+end
+
+function tf = canBuildRoadAtEdge(state, playerId, e)
+tf = false;
+if state.board.edges(e).owner ~= 0, return; end
+vPair = state.board.edges(e).vertexIds;
+for k = 1:2
+    v = vPair(k);
+    if isRoadConnectableAt(state, playerId, v, e), tf = true; return; end
+end
+end
+
+function tf = isRoadConnectableAt(state, playerId, v, excludeEdge)
+% Player can connect a road at v if they own a structure there,
+% or own an adjacent road (not blocked by an opponent settlement).
+if state.board.vertices(v).owner == playerId, tf = true; return; end
+if state.board.vertices(v).owner ~= 0 % opponent blocks
+    tf = false; return;
+end
+for e2 = state.board.vertices(v).adjEdgeIds
+    if e2 ~= excludeEdge && state.board.edges(e2).owner == playerId
+        tf = true; return;
+    end
+end
+tf = false;
+end
+
+function p = diceProbability(n)
+weights = [1 2 3 4 5 6 5 4 3 2 1];
+if n < 2 || n > 12, p = 0;
+else, p = weights(n-1) / 36; end
+end
 
 function tf = canAfford(resources, cost)
-%CANAFFORD  True if resources cover cost element-wise.
 tf = all(resources >= cost);
 end
 
 function idx = resourceIndex(resourceType, resourceNames)
-%RESOURCEINDEX  Maps a resource name to its vector index (1..5).
 idx = find(strcmp(resourceNames, resourceType), 1);
 if isempty(idx)
     error('Unknown resource type: %s', resourceType);
@@ -581,128 +1120,185 @@ end
 end
 
 function printPlayerResources(state, playerId, config)
-%PRINTPLAYERRESOURCES  Prints one players inventory and VP to the console.
 res   = state.players(playerId).resources;
 names = config.resourceNames;
 parts = cell(1, numel(names));
 for i = 1:numel(names)
     parts{i} = sprintf('%s:%d', names{i}, res(i));
 end
-fprintf('  Resources: %s | VP: %d\n', strjoin(parts, '  '), ...
-    state.players(playerId).victoryPoints);
+p = state.players(playerId);
+fprintf('  Res: %s | VP:%d S:%d C:%d R:%d | Army:%d Road:%d\n', ...
+    strjoin(parts,'  '), p.victoryPoints, p.settlementCount, p.cityCount, ...
+    p.roadCount, p.knightsPlayed, computeLongestRoadLen(state, playerId));
 end
 
-%% ------------------------- Live (Human) Agent -------------------------
+function entry = makeHistoryEntry(state, playerId, roll, action)
+entry = struct('turn', state.turnIndex, 'player', playerId, 'roll', roll, ...
+    'type', action.type, 'vertexId', action.vertexId, 'edgeId', action.edgeId, ...
+    'hexId', action.hexId, 'targetPlayer', action.targetPlayer, ...
+    'resourceType', action.resourceType, 'resource2', action.resource2, ...
+    'vp', state.players(playerId).victoryPoints);
+end
+
+function s = formatActionLog(playerId, playerName, action, state, config) %#ok<INUSD>
+switch action.type
+    case 'pass'
+        s = sprintf('P%d (%s) -> pass', playerId, playerName);
+    case 'build_settlement'
+        s = sprintf('P%d (%s) -> settlement @v%d', playerId, playerName, action.vertexId);
+    case 'build_road'
+        v1 = state.board.edges(action.edgeId).vertexIds(1);
+        v2 = state.board.edges(action.edgeId).vertexIds(2);
+        s  = sprintf('P%d (%s) -> road e%d (v%d-v%d)', playerId, playerName, action.edgeId, v1, v2);
+    case 'build_city'
+        s = sprintf('P%d (%s) -> city @v%d', playerId, playerName, action.vertexId);
+    case 'buy_dev_card'
+        s = sprintf('P%d (%s) -> bought dev card', playerId, playerName);
+    case {'play_knight','move_robber'}
+        s = sprintf('P%d (%s) -> %s hex%d steal:P%d', playerId, playerName, action.type, action.hexId, action.targetPlayer);
+    case 'play_road_building'
+        s = sprintf('P%d (%s) -> road building card', playerId, playerName);
+    case 'play_year_of_plenty'
+        s = sprintf('P%d (%s) -> year of plenty (%s+%s)', playerId, playerName, action.resourceType, action.resource2);
+    case 'play_monopoly'
+        s = sprintf('P%d (%s) -> monopoly (%s)', playerId, playerName, action.resourceType);
+    case 'maritime_trade'
+        s = sprintf('P%d (%s) -> trade %s->%s', playerId, playerName, action.resourceType, action.resource2);
+    otherwise
+        s = sprintf('P%d (%s) -> %s', playerId, playerName, action.type);
+end
+s = sprintf('%s | VP=%d', s, state.players(playerId).victoryPoints);
+end
+
+%% ========================= LIVE PLAYER AGENT =========================
 
 function action = agent_live(state, legalActions, playerId, config)
-%AGENT_LIVE  Interactive human player. Reads a numbered choice from keyboard.
-
 fprintf('\n  *** Your turn, Player %d! ***\n', playerId);
 res   = state.players(playerId).resources;
 names = config.resourceNames;
 fprintf('  Resources: ');
-for i = 1:numel(names)
-    fprintf('%s=%d  ', names{i}, res(i));
+for i = 1:numel(names), fprintf('%s=%d  ', names{i}, res(i)); end
+p = state.players(playerId);
+dc = p.devCards;
+fprintf('\n  VP: %d  |  S:%d C:%d R:%d  |  Knights played: %d\n', ...
+    p.victoryPoints, p.settlementCount, p.cityCount, p.roadCount, p.knightsPlayed);
+fprintf('  Dev cards: Kn:%d RB:%d YP:%d Mon:%d VP:%d  (new this turn: Kn:%d RB:%d YP:%d Mon:%d)\n', ...
+    dc.knight, dc.roadBuilding, dc.yearOfPlenty, dc.monopoly, dc.vpCard, ...
+    p.newDevCards.knight, p.newDevCards.roadBuilding, p.newDevCards.yearOfPlenty, p.newDevCards.monopoly);
+fprintf('  Road length: %d  |  LongestRoad holder: P%d  |  LargestArmy holder: P%d\n', ...
+    computeLongestRoadLen(state, playerId), state.longestRoadPlayer, state.largestArmyPlayer);
+if state.freeRoads > 0
+    fprintf('  [%d free road(s) remaining from Road Building card]\n', state.freeRoads);
 end
-fprintf('\n  VP: %d\n\n', state.players(playerId).victoryPoints);
 
-fprintf('  Legal actions:\n');
+rates = getTradeRates(state, playerId, config);
+fprintf('\n  Legal actions:\n');
 for i = 1:numel(legalActions)
     a = legalActions(i);
-    if strcmp(a.type, 'pass')
-        fprintf('    %d) pass\n', i);
-    else
-        v   = a.vertexId;
-        pos = state.board.vertices(v).pos;
-        fprintf('    %d) build_settlement  vertex %d  (x=%.2f, y=%.2f)\n', ...
-            i, v, pos(1), pos(2));
+    switch a.type
+        case 'pass'
+            fprintf('    %d) pass\n', i);
+        case 'build_settlement'
+            pos = state.board.vertices(a.vertexId).pos;
+            fprintf('    %d) build_settlement  v%d  (%.2f, %.2f)\n', i, a.vertexId, pos(1), pos(2));
+        case 'build_road'
+            v1 = state.board.edges(a.edgeId).vertexIds(1);
+            v2 = state.board.edges(a.edgeId).vertexIds(2);
+            fprintf('    %d) build_road  e%d  (v%d--v%d)\n', i, a.edgeId, v1, v2);
+        case 'build_city'
+            pos = state.board.vertices(a.vertexId).pos;
+            fprintf('    %d) build_city  v%d  (%.2f, %.2f)\n', i, a.vertexId, pos(1), pos(2));
+        case 'buy_dev_card'
+            fprintf('    %d) buy_dev_card  (%d left in deck)\n', i, numel(state.devCardDeck));
+        case 'play_knight'
+            fprintf('    %d) play_knight -> hex%d, steal from P%d\n', i, a.hexId, a.targetPlayer);
+        case 'play_road_building'
+            fprintf('    %d) play_road_building (2 free roads)\n', i);
+        case 'play_year_of_plenty'
+            fprintf('    %d) play_year_of_plenty (%s + %s)\n', i, a.resourceType, a.resource2);
+        case 'play_monopoly'
+            fprintf('    %d) play_monopoly (%s)\n', i, a.resourceType);
+        case 'move_robber'
+            fprintf('    %d) move_robber -> hex%d, steal from P%d\n', i, a.hexId, a.targetPlayer);
+        case 'maritime_trade'
+            ri = resourceIndex(a.resourceType, config.resourceNames);
+            fprintf('    %d) trade %d %s -> 1 %s\n', i, rates(ri), a.resourceType, a.resource2);
+        otherwise
+            fprintf('    %d) %s\n', i, a.type);
     end
 end
 
 choice = 0;
 while choice < 1 || choice > numel(legalActions) || isnan(choice)
-    raw    = input('\n  Enter action number: ', 's');
+    raw    = input('\n  Enter action number: ','s');
     choice = str2double(raw);
     if isnan(choice) || choice < 1 || choice > numel(legalActions)
         fprintf('  Invalid — enter a number from 1 to %d.\n', numel(legalActions));
         choice = 0;
     end
 end
-
 action = legalActions(choice);
 end
 
 %% ========================= VISUALIZATION =========================
 
 function fig = initGameFig(state, config, playerNames)
-%INITGAMEFIG  Creates the Catan game visualization window.
-
-fig = figure( ...
-    'Name',        'Catan Simulation', ...
-    'NumberTitle', 'off', ...
-    'Color',       [0.10 0.13 0.20], ...
-    'Position',    [60 60 1300 740]);
-
-% Board axes — left 62% of the window.
-ax_board = axes('Parent', fig, ...
-    'Position',  [0.02 0.04 0.60 0.94], ...
-    'Color',     [0.16 0.34 0.60], ...
-    'XColor',    'none', ...
-    'YColor',    'none', ...
-    'Tag',       'board');
-axis(ax_board, 'equal');
-hold(ax_board, 'on');
-
-% Info panel axes — right 35% of the window.
-ax_info = axes('Parent', fig, ...
-    'Position',  [0.64 0.04 0.35 0.94], ...
-    'Color',     [0.08 0.10 0.16], ...
-    'XColor',    'none', ...
-    'YColor',    'none', ...
-    'Tag',       'info');
-hold(ax_info, 'on');
-
-drawBoard(ax_board, state, config);
-drawInfoPanel(ax_info, state, config, playerNames, 0, 'Setting up board...', 0);
+fig = figure('Name','Catan Simulation','NumberTitle','off', ...
+    'Color',[0.10 0.13 0.20],'Position',[60 60 1360 760]);
+axes('Parent',fig,'Position',[0.02 0.04 0.60 0.94], ...
+    'Color',[0.16 0.34 0.60],'XColor','none','YColor','none','Tag','board');
+axis(findobj(fig,'Tag','board'),'equal');
+hold(findobj(fig,'Tag','board'),'on');
+axes('Parent',fig,'Position',[0.64 0.04 0.35 0.94], ...
+    'Color',[0.08 0.10 0.16],'XColor','none','YColor','none','Tag','info');
+hold(findobj(fig,'Tag','info'),'on');
+drawBoard(findobj(fig,'Tag','board'), state, config);
+drawInfoPanel(findobj(fig,'Tag','info'), state, config, playerNames, 0, 'Setting up board...', 0);
 drawnow;
 end
 
 function updateGameFig(fig, state, config, playerNames, currentPlayerId, actionStr, rollNum)
-%UPDATEGAMEFIG  Redraws both panels with current game state.
-
-if ~ishandle(fig)
-    return;
-end
-
-ax_board = findobj(fig, 'Tag', 'board');
-ax_info  = findobj(fig, 'Tag', 'info');
-
-cla(ax_board);
-cla(ax_info);
-
+if ~ishandle(fig), return; end
+ax_board = findobj(fig,'Tag','board');
+ax_info  = findobj(fig,'Tag','info');
+cla(ax_board); cla(ax_info);
 drawBoard(ax_board, state, config);
 drawInfoPanel(ax_info, state, config, playerNames, currentPlayerId, actionStr, rollNum);
 drawnow;
 end
 
 function highlightLegalActions(fig, legalActions, state)
-%HIGHLIGHTLEGALACTIONS  Overlays yellow rings on legal build vertices.
-%                       Called before the live player picks an action.
-
-if ~ishandle(fig)
-    return;
-end
-ax_board = findobj(fig, 'Tag', 'board');
-
+if ~ishandle(fig), return; end
+ax = findobj(fig,'Tag','board');
 for i = 1:numel(legalActions)
-    if strcmp(legalActions(i).type, 'build_settlement')
-        v   = legalActions(i).vertexId;
-        pos = state.board.vertices(v).pos;
-        plot(ax_board, pos(1), pos(2), 'o', ...
-            'MarkerSize',      20, ...
-            'MarkerFaceColor', 'none', ...
-            'MarkerEdgeColor', [1.0 0.95 0.15], ...
-            'LineWidth',       2.5);
+    a = legalActions(i);
+    if strcmp(a.type,'build_settlement') || strcmp(a.type,'build_city')
+        pos = state.board.vertices(a.vertexId).pos;
+        plot(ax, pos(1), pos(2), 'o', 'MarkerSize',20, ...
+            'MarkerFaceColor','none','MarkerEdgeColor',[1.0 0.95 0.15],'LineWidth',2.5);
+    elseif strcmp(a.type,'build_road')
+        v1  = state.board.edges(a.edgeId).vertexIds(1);
+        v2  = state.board.edges(a.edgeId).vertexIds(2);
+        p1  = state.board.vertices(v1).pos;
+        p2  = state.board.vertices(v2).pos;
+        mx  = (p1(1)+p2(1))/2;  my = (p1(2)+p2(2))/2;
+        plot(ax, mx, my, 'o', 'MarkerSize',10, ...
+            'MarkerFaceColor',[1.0 0.95 0.15],'MarkerEdgeColor','none');
+    end
+end
+drawnow;
+end
+
+function highlightRobberActions(fig, legalActions, state)
+if ~ishandle(fig), return; end
+ax = findobj(fig,'Tag','board');
+for i = 1:numel(legalActions)
+    a = legalActions(i);
+    if strcmp(a.type,'move_robber') && a.hexId > 0
+        c = state.board.hexes(a.hexId).center;
+        theta = linspace(0,2*pi,20);
+        plot(ax, c(1)+0.45*cos(theta), c(2)+0.45*sin(theta), '-', ...
+            'Color',[1.0 0.3 0.1],'LineWidth',2);
     end
 end
 drawnow;
@@ -712,118 +1308,114 @@ end
 %  Board renderer
 % -----------------------------------------------------------------
 
-function drawBoard(ax, state, config)
-%DRAWBOARD  Renders hex tiles, dice tokens, vertex IDs, and settlements.
-
-hold(ax, 'on');
-axis(ax, 'equal');
-axis(ax, 'off');
-set(ax, 'Color', [0.16 0.34 0.60]);
-
+function drawBoard(ax, state, config) %#ok<INUSD>
+hold(ax,'on'); axis(ax,'equal'); axis(ax,'off');
+set(ax,'Color',[0.16 0.34 0.60]);
 board = state.board;
 
 % --- Hex tiles ---
 for h = 1:numel(board.hexes)
     hex  = board.hexes(h);
     vIds = hex.vertexIds;
-
-    % Collect the 6 corner positions in polygon order.
-    xs = zeros(6, 1);
-    ys = zeros(6, 1);
+    xs   = zeros(6,1); ys = zeros(6,1);
     for k = 1:6
         xs(k) = board.vertices(vIds(k)).pos(1);
         ys(k) = board.vertices(vIds(k)).pos(2);
     end
-
     faceC = hexResourceColor(hex.resourceType);
-    patch(ax, xs, ys, faceC, ...
-        'EdgeColor', [0.22 0.16 0.08], ...
-        'LineWidth', 2.2);
-
-    cx = hex.center(1);
-    cy = hex.center(2);
-
-    % Resource name label.
-    text(ax, cx, cy - 0.30, hex.resourceType, ...
-        'HorizontalAlignment', 'center', ...
-        'FontSize',   7, ...
-        'FontWeight', 'bold', ...
-        'Color',      [0.10 0.08 0.04]);
-
-    % Dice number token.
+    patch(ax, xs, ys, faceC, 'EdgeColor',[0.22 0.16 0.08],'LineWidth',2.2);
+    cx = hex.center(1); cy = hex.center(2);
+    text(ax, cx, cy-0.30, hex.resourceType, 'HorizontalAlignment','center', ...
+        'FontSize',7,'FontWeight','bold','Color',[0.10 0.08 0.04]);
     if hex.diceNumber ~= 7
         numColor = [0.08 0.08 0.08];
-        if hex.diceNumber == 6 || hex.diceNumber == 8
-            numColor = [0.78 0.05 0.05]; % red highlight for high-prob numbers
-        end
-
-        % White circular token background.
-        theta  = linspace(0, 2*pi, 32);
-        txs    = cx + 0.32 * cos(theta);
-        tys    = cy + 0.10 + 0.32 * sin(theta);
-        patch(ax, txs, tys, [0.96 0.93 0.84], ...
-            'EdgeColor', [0.55 0.45 0.30], 'LineWidth', 1.2);
-
-        % Number text.
-        text(ax, cx, cy + 0.14, num2str(hex.diceNumber), ...
-            'HorizontalAlignment', 'center', ...
-            'FontSize',   13, ...
-            'FontWeight', 'bold', ...
-            'Color',      numColor);
-
-        % Probability pips below the number.
-        nPips      = hexDotCount(hex.diceNumber);
-        pipSpacing = 0.11;
-        startPipX  = cx - (nPips - 1) * pipSpacing / 2;
+        if hex.diceNumber==6 || hex.diceNumber==8, numColor=[0.78 0.05 0.05]; end
+        theta = linspace(0,2*pi,32);
+        patch(ax, cx+0.32*cos(theta), cy+0.10+0.32*sin(theta), [0.96 0.93 0.84], ...
+            'EdgeColor',[0.55 0.45 0.30],'LineWidth',1.2);
+        text(ax, cx, cy+0.14, num2str(hex.diceNumber), 'HorizontalAlignment','center', ...
+            'FontSize',13,'FontWeight','bold','Color',numColor);
+        nPips = hexDotCount(hex.diceNumber);
+        pipSp = 0.11;
+        startPX = cx - (nPips-1)*pipSp/2;
         for d = 1:nPips
-            px = startPipX + (d - 1) * pipSpacing;
-            py = cy - 0.11;
-            patch(ax, px + 0.035*cos(theta), py + 0.035*sin(theta), numColor, ...
-                'EdgeColor', 'none');
+            px = startPX + (d-1)*pipSp; py = cy-0.11;
+            patch(ax, px+0.035*cos(theta), py+0.035*sin(theta), numColor,'EdgeColor','none');
         end
     end
 end
 
-% --- Vertex ID labels (small, so live player can identify vertices) ---
+% --- Robber token ---
+if isfield(state,'robberHex') && state.robberHex > 0 && state.robberHex <= numel(board.hexes)
+    rc = board.hexes(state.robberHex).center;
+    theta = linspace(0,2*pi,24);
+    patch(ax, rc(1)+0.22*cos(theta), rc(2)+0.55+0.22*sin(theta), ...
+        [0.12 0.10 0.08],'EdgeColor',[0.75 0.60 0.30],'LineWidth',1.8);
+    text(ax, rc(1), rc(2)+0.55,'R','HorizontalAlignment','center', ...
+        'VerticalAlignment','middle','FontSize',9,'FontWeight','bold','Color',[0.95 0.85 0.55]);
+end
+
+% --- Port indicators ---
+for v = 1:numel(board.vertices)
+    if ~strcmp(board.vertices(v).portType,'none')
+        pos  = board.vertices(v).pos;
+        pc   = portColor(board.vertices(v).portType);
+        lbl  = portShortLabel(board.vertices(v).portType);
+        plot(ax, pos(1), pos(2), '^', 'MarkerSize',7, ...
+            'MarkerFaceColor',pc,'MarkerEdgeColor',[0.9 0.9 0.9],'LineWidth',0.8);
+        text(ax, pos(1), pos(2)+0.22, lbl,'HorizontalAlignment','center', ...
+            'FontSize',5.5,'Color',[0.95 0.95 0.75],'FontWeight','bold');
+    end
+end
+
+% --- Roads ---
+if isfield(board,'edges')
+    for e = 1:numel(board.edges)
+        if board.edges(e).owner ~= 0
+            v1 = board.edges(e).vertexIds(1);
+            v2 = board.edges(e).vertexIds(2);
+            p1 = board.vertices(v1).pos;
+            p2 = board.vertices(v2).pos;
+            pc = playerDisplayColor(board.edges(e).owner);
+            plot(ax,[p1(1),p2(1)],[p1(2),p2(2)],'-','Color',pc,'LineWidth',4.5);
+        end
+    end
+end
+
+% --- Vertex ID labels (unoccupied) ---
 for v = 1:numel(board.vertices)
     pos = board.vertices(v).pos;
     if board.vertices(v).owner == 0
-        text(ax, pos(1), pos(2), num2str(v), ...
-            'HorizontalAlignment', 'center', ...
-            'FontSize',    5.5, ...
-            'Color',       [0.65 0.68 0.78], ...
-            'FontAngle',   'italic');
+        text(ax, pos(1), pos(2), num2str(v), 'HorizontalAlignment','center', ...
+            'FontSize',5.5,'Color',[0.65 0.68 0.78],'FontAngle','italic');
     end
 end
 
-% --- Settlement markers ---
+% --- Settlements / Cities ---
 for v = 1:numel(board.vertices)
     owner = board.vertices(v).owner;
     if owner ~= 0
         pos = board.vertices(v).pos;
         pc  = playerDisplayColor(owner);
-
-        % Outer ring.
-        plot(ax, pos(1), pos(2), 's', ...
-            'MarkerSize',      16, ...
-            'MarkerFaceColor', pc, ...
-            'MarkerEdgeColor', [0.95 0.95 0.95], ...
-            'LineWidth',       1.8);
-
-        % Player number label.
-        text(ax, pos(1), pos(2), num2str(owner), ...
-            'HorizontalAlignment', 'center', ...
-            'VerticalAlignment',   'middle', ...
-            'FontSize',   7, ...
-            'FontWeight', 'bold', ...
-            'Color',      'w');
+        if board.vertices(v).isCity
+            % Diamond marker for city
+            plot(ax, pos(1), pos(2), 'd', 'MarkerSize',20, ...
+                'MarkerFaceColor',pc,'MarkerEdgeColor',[0.95 0.95 0.95],'LineWidth',2.0);
+            text(ax, pos(1), pos(2), [num2str(owner) 'C'], ...
+                'HorizontalAlignment','center','VerticalAlignment','middle', ...
+                'FontSize',6,'FontWeight','bold','Color','w');
+        else
+            % Square marker for settlement
+            plot(ax, pos(1), pos(2), 's', 'MarkerSize',16, ...
+                'MarkerFaceColor',pc,'MarkerEdgeColor',[0.95 0.95 0.95],'LineWidth',1.8);
+            text(ax, pos(1), pos(2), num2str(owner), ...
+                'HorizontalAlignment','center','VerticalAlignment','middle', ...
+                'FontSize',7,'FontWeight','bold','Color','w');
+        end
     end
 end
 
-title(ax, 'Catan Board', ...
-    'Color',    [0.90 0.92 0.95], ...
-    'FontSize', 13, ...
-    'FontWeight', 'bold');
+title(ax,'Catan Board','Color',[0.90 0.92 0.95],'FontSize',13,'FontWeight','bold');
 end
 
 % -----------------------------------------------------------------
@@ -831,174 +1423,124 @@ end
 % -----------------------------------------------------------------
 
 function drawInfoPanel(ax, state, config, playerNames, currentPlayerId, actionStr, rollNum)
-%DRAWINFOPANEL  Renders player stats, resources, turn info, and legend.
-
-cla(ax);
-axis(ax, 'off');
-set(ax, 'Color', [0.08 0.10 0.16]);
-hold(ax, 'on');
-xlim(ax, [0 1]);
-ylim(ax, [0 1]);
+cla(ax); axis(ax,'off');
+set(ax,'Color',[0.08 0.10 0.16]);
+hold(ax,'on'); xlim(ax,[0 1]); ylim(ax,[0 1]);
 
 P = numel(state.players);
 
-% --- Title ---
-text(ax, 0.50, 0.985, 'CATAN', ...
-    'HorizontalAlignment', 'center', ...
-    'VerticalAlignment',   'top', ...
-    'FontSize',   20, ...
-    'FontWeight', 'bold', ...
-    'Color',      [0.95 0.80 0.18]);
+text(ax, 0.50, 0.988, 'CATAN','HorizontalAlignment','center','VerticalAlignment','top', ...
+    'FontSize',20,'FontWeight','bold','Color',[0.95 0.80 0.18]);
 
-% --- Turn / roll info ---
 if rollNum > 0
     rollStr = sprintf('Turn %d   |   Roll: %d', state.turnIndex, rollNum);
 else
-    rollStr = sprintf('Initial Placement');
+    rollStr = 'Initial Placement';
 end
-text(ax, 0.50, 0.935, rollStr, ...
-    'HorizontalAlignment', 'center', ...
-    'VerticalAlignment',   'top', ...
-    'FontSize', 10, ...
-    'Color',    [0.78 0.84 0.92]);
+text(ax, 0.50, 0.940, rollStr,'HorizontalAlignment','center','VerticalAlignment','top', ...
+    'FontSize',10,'Color',[0.78 0.84 0.92]);
 
-% --- Last action ---
 if ~isempty(actionStr)
-    text(ax, 0.50, 0.895, actionStr, ...
-        'HorizontalAlignment', 'center', ...
-        'VerticalAlignment',   'top', ...
-        'FontSize',    8.5, ...
-        'Color',       [0.68 0.82 0.68], ...
-        'Interpreter', 'none');
+    text(ax, 0.50, 0.900, actionStr,'HorizontalAlignment','center','VerticalAlignment','top', ...
+        'FontSize',8.5,'Color',[0.68 0.82 0.68],'Interpreter','none');
 end
 
-% --- Player panels ---
-panelTop    = 0.855;
-panelBottom = 0.30;
+% Longest road / Largest army display
+bonusStr = '';
+if state.longestRoadPlayer ~= 0
+    bonusStr = sprintf('LR:P%d  ', state.longestRoadPlayer);
+end
+if state.largestArmyPlayer ~= 0
+    bonusStr = [bonusStr, sprintf('LA:P%d', state.largestArmyPlayer)];
+end
+if ~isempty(bonusStr)
+    text(ax, 0.50, 0.866, bonusStr,'HorizontalAlignment','center','VerticalAlignment','top', ...
+        'FontSize',8.5,'Color',[0.95 0.85 0.40],'FontWeight','bold');
+end
+
+panelTop    = 0.850;
+panelBottom = 0.24;
 totalH      = panelTop - panelBottom;
 panelH      = totalH / P;
 
 for p = 1:P
-    yTop = panelTop - (p - 1) * panelH;
-    yBot = yTop - panelH + 0.010;
+    yTop = panelTop - (p-1)*panelH;
+    yBot = yTop - panelH + 0.008;
     pc   = playerDisplayColor(p);
 
-    % Panel background.
     if p == currentPlayerId
-        bgColor   = [0.17 0.22 0.34];
-        edgeColor = pc;
-        edgeW     = 2.2;
+        bgColor=[0.17 0.22 0.34]; edgeColor=pc; edgeW=2.2;
     else
-        bgColor   = [0.12 0.14 0.20];
-        edgeColor = [0.28 0.30 0.40];
-        edgeW     = 1.0;
+        bgColor=[0.12 0.14 0.20]; edgeColor=[0.28 0.30 0.40]; edgeW=1.0;
     end
-    patch(ax, [0.03 0.97 0.97 0.03], [yBot yBot yTop-0.008 yTop-0.008], ...
-        bgColor, 'EdgeColor', edgeColor, 'LineWidth', edgeW, 'FaceAlpha', 1.0);
+    patch(ax,[0.03 0.97 0.97 0.03],[yBot yBot yTop-0.006 yTop-0.006], ...
+        bgColor,'EdgeColor',edgeColor,'LineWidth',edgeW,'FaceAlpha',1.0);
+    patch(ax,[0.03 0.068 0.068 0.03],[yBot yBot yTop-0.006 yTop-0.006],pc,'EdgeColor','none');
 
-    % Colored player indicator bar (left edge).
-    patch(ax, [0.03 0.065 0.065 0.03], [yBot yBot yTop-0.008 yTop-0.008], ...
-        pc, 'EdgeColor', 'none');
-
-    % Player name + type.
     nameStr = sprintf('Player %d  —  %s', p, playerNames{p});
-    if p == currentPlayerId
-        nameStr = [nameStr '  (active)']; %#ok<AGROW>
-    end
-    text(ax, 0.09, yTop - 0.018, nameStr, ...
-        'VerticalAlignment', 'top', ...
-        'FontSize',   10, ...
-        'FontWeight', 'bold', ...
-        'Color',      pc);
+    if p == currentPlayerId, nameStr = [nameStr '  (active)']; end %#ok<AGROW>
+    text(ax, 0.09, yTop-0.014, nameStr,'VerticalAlignment','top', ...
+        'FontSize',9.5,'FontWeight','bold','Color',pc);
 
-    % Victory points — large display.
-    text(ax, 0.88, yTop - 0.012, sprintf('%d VP', state.players(p).victoryPoints), ...
-        'HorizontalAlignment', 'right', ...
-        'VerticalAlignment',   'top', ...
-        'FontSize',   13, ...
-        'FontWeight', 'bold', ...
-        'Color',      [0.95 0.90 0.65]);
+    vp = state.players(p).victoryPoints;
+    text(ax, 0.88, yTop-0.010, sprintf('%d VP', vp),'HorizontalAlignment','right', ...
+        'VerticalAlignment','top','FontSize',13,'FontWeight','bold','Color',[0.95 0.90 0.65]);
 
-    % Settlement count.
-    text(ax, 0.09, yTop - 0.018 - 0.048, ...
-        sprintf('Settlements: %d', state.players(p).settlementCount), ...
-        'VerticalAlignment', 'top', ...
-        'FontSize', 8.5, ...
-        'Color',    [0.82 0.86 0.90]);
+    % Counts row
+    pl = state.players(p);
+    dc = pl.devCards;
+    text(ax, 0.09, yTop-0.014-0.040, ...
+        sprintf('S:%d  C:%d  R:%d  |  Kn:%d RB:%d YP:%d Mon:%d VP:%d', ...
+        pl.settlementCount, pl.cityCount, pl.roadCount, ...
+        dc.knight, dc.roadBuilding, dc.yearOfPlenty, dc.monopoly, dc.vpCard), ...
+        'VerticalAlignment','top','FontSize',7,'Color',[0.82 0.86 0.90]);
 
-    % Resources row.
-    res        = state.players(p).resources;
-    rNames     = config.resourceNames;
-    shortNames = {'Wd', 'Bk', 'Sh', 'Wh', 'Or'};
-    resX       = 0.09;
-    resY       = yTop - 0.018 - 0.095;
-    boxW       = 0.155;
-    boxH       = panelH * 0.30;
-
+    % Resources row
+    res    = pl.resources;
+    rNames = config.resourceNames;
+    shortN = {'Wd','Bk','Sh','Wh','Or'};
+    resX   = 0.09;
+    resY   = yTop - 0.014 - 0.085;
+    boxW   = 0.155;
+    boxH   = panelH * 0.28;
     for ri = 1:numel(rNames)
-        bx = resX + (ri - 1) * boxW;
-        % Colored resource mini-tile.
-        patch(ax, bx + [0 boxW-0.01 boxW-0.01 0], resY + [-boxH -boxH 0 0], ...
-            hexResourceColor(rNames{ri}), ...
-            'EdgeColor', [0.20 0.18 0.15], 'LineWidth', 0.8);
-        % Short name.
-        text(ax, bx + (boxW-0.01)/2, resY - 0.002, shortNames{ri}, ...
-            'HorizontalAlignment', 'center', ...
-            'VerticalAlignment',   'top', ...
-            'FontSize', 6.5, 'Color', [0.12 0.10 0.08], 'FontWeight', 'bold');
-        % Count.
-        text(ax, bx + (boxW-0.01)/2, resY - boxH/2 - 0.002, num2str(res(ri)), ...
-            'HorizontalAlignment', 'center', ...
-            'VerticalAlignment',   'middle', ...
-            'FontSize', 10, 'FontWeight', 'bold', 'Color', [0.05 0.05 0.05]);
+        bx = resX + (ri-1)*boxW;
+        patch(ax, bx+[0 boxW-0.01 boxW-0.01 0], resY+[-boxH -boxH 0 0], ...
+            hexResourceColor(rNames{ri}),'EdgeColor',[0.20 0.18 0.15],'LineWidth',0.8);
+        text(ax, bx+(boxW-0.01)/2, resY-0.002, shortN{ri}, ...
+            'HorizontalAlignment','center','VerticalAlignment','top', ...
+            'FontSize',6.5,'Color',[0.12 0.10 0.08],'FontWeight','bold');
+        text(ax, bx+(boxW-0.01)/2, resY-boxH/2-0.002, num2str(res(ri)), ...
+            'HorizontalAlignment','center','VerticalAlignment','middle', ...
+            'FontSize',10,'FontWeight','bold','Color',[0.05 0.05 0.05]);
     end
 end
 
-% --- Win-condition bar ---
-text(ax, 0.50, panelBottom - 0.012, ...
-    sprintf('First to %d settlements wins  |  Max %d turns', ...
-    config.winSettlements, config.maxTurns), ...
-    'HorizontalAlignment', 'center', ...
-    'VerticalAlignment',   'top', ...
-    'FontSize', 8, ...
-    'Color',    [0.50 0.54 0.62]);
+text(ax, 0.50, panelBottom-0.010, ...
+    sprintf('First to %d VP wins  |  Longest Road (5+) = 2VP  |  Largest Army (3+) = 2VP', config.winVP), ...
+    'HorizontalAlignment','center','VerticalAlignment','top','FontSize',7.5,'Color',[0.50 0.54 0.62]);
 
-% --- Resource legend ---
-legendTop = panelBottom - 0.065;
-text(ax, 0.50, legendTop, 'Resource Legend', ...
-    'HorizontalAlignment', 'center', ...
-    'VerticalAlignment',   'top', ...
-    'FontSize',   8.5, ...
-    'FontWeight', 'bold', ...
-    'Color',      [0.72 0.74 0.82]);
-
-rTypes  = {'wood', 'brick', 'sheep', 'wheat', 'ore', 'desert'};
-cols    = 3;
-lBoxW   = 0.24;
-lBoxH   = 0.040;
-lStartX = 0.07;
-lStartY = legendTop - 0.035;
-
+% Resource legend
+legendTop = panelBottom - 0.055;
+text(ax, 0.50, legendTop,'Resource Legend','HorizontalAlignment','center','VerticalAlignment','top', ...
+    'FontSize',8.5,'FontWeight','bold','Color',[0.72 0.74 0.82]);
+rTypes  = {'wood','brick','sheep','wheat','ore','desert'};
+cols    = 3; lBoxW = 0.24; lBoxH = 0.038; lStartX = 0.07;
+lStartY = legendTop - 0.032;
 for ri = 1:numel(rTypes)
-    row = floor((ri - 1) / cols);
-    col = mod(ri - 1, cols);
-    bx  = lStartX + col * (lBoxW + 0.04);
-    by  = lStartY - row * (lBoxH + 0.014);
-
-    patch(ax, bx + [0 lBoxW lBoxW 0], by + [-lBoxH -lBoxH 0 0], ...
-        hexResourceColor(rTypes{ri}), ...
-        'EdgeColor', [0.30 0.28 0.22], 'LineWidth', 1.0);
-    text(ax, bx + lBoxW + 0.015, by - lBoxH/2, rTypes{ri}, ...
-        'VerticalAlignment', 'middle', ...
-        'FontSize', 7.5, ...
-        'Color',    [0.78 0.80 0.88]);
+    row = floor((ri-1)/cols); col = mod(ri-1,cols);
+    bx  = lStartX + col*(lBoxW+0.04);
+    by  = lStartY - row*(lBoxH+0.012);
+    patch(ax, bx+[0 lBoxW lBoxW 0], by+[-lBoxH -lBoxH 0 0], hexResourceColor(rTypes{ri}), ...
+        'EdgeColor',[0.30 0.28 0.22],'LineWidth',1.0);
+    text(ax, bx+lBoxW+0.015, by-lBoxH/2, rTypes{ri},'VerticalAlignment','middle', ...
+        'FontSize',7.5,'Color',[0.78 0.80 0.88]);
 end
 end
 
-%% ------------------------- Color Helpers -------------------------
+%% ========================= COLOR HELPERS =========================
 
 function c = hexResourceColor(rType)
-%HEXRESOURCECOLOR  Face color for a hex tile based on its resource type.
 switch lower(rType)
     case 'wood',   c = [0.18 0.50 0.18];
     case 'brick',  c = [0.74 0.28 0.08];
@@ -1011,44 +1553,52 @@ end
 end
 
 function c = playerDisplayColor(playerId)
-%PLAYERDISPLAYCOLOR  Unique display color per player index (cycles for >4 players).
-colors = [
-    0.92 0.22 0.22;   % P1 red
-    0.25 0.52 0.96;   % P2 blue
-    0.96 0.66 0.10;   % P3 orange
-    0.24 0.82 0.36;   % P4 green
-];
-if playerId == 0
-    c = [0.50 0.50 0.50];
-else
-    c = colors(mod(playerId - 1, size(colors, 1)) + 1, :);
-end
+colors = [0.92 0.22 0.22; 0.25 0.52 0.96; 0.96 0.66 0.10; 0.24 0.82 0.36];
+if playerId == 0, c = [0.50 0.50 0.50];
+else, c = colors(mod(playerId-1, size(colors,1))+1, :); end
 end
 
 function n = hexDotCount(diceNum)
-%HEXDOTCOUNT  Number of probability pips shown on a dice token (mirrors Catan standard).
-dotMap = [1 2 3 4 5 0 5 4 3 2 1]; % indices 1..11 correspond to rolls 2..12
-if diceNum < 2 || diceNum > 12
-    n = 0;
-else
-    n = dotMap(diceNum - 1);
+dotMap = [1 2 3 4 5 0 5 4 3 2 1];
+if diceNum < 2 || diceNum > 12, n = 0;
+else, n = dotMap(diceNum-1); end
+end
+
+function c = portColor(portType)
+switch portType
+    case '3to1',      c = [0.70 0.70 0.70];
+    case 'wood2to1',  c = [0.18 0.50 0.18];
+    case 'brick2to1', c = [0.74 0.28 0.08];
+    case 'sheep2to1', c = [0.62 0.88 0.32];
+    case 'wheat2to1', c = [0.94 0.82 0.12];
+    case 'ore2to1',   c = [0.52 0.54 0.60];
+    otherwise,        c = [0.70 0.70 0.70];
 end
 end
 
-%% ------------------------- Board Generation -------------------------
+function s = portShortLabel(portType)
+switch portType
+    case '3to1',      s = '3:1';
+    case 'wood2to1',  s = '2:1Wd';
+    case 'brick2to1', s = '2:1Bk';
+    case 'sheep2to1', s = '2:1Sh';
+    case 'wheat2to1', s = '2:1Wh';
+    case 'ore2to1',   s = '2:1Or';
+    otherwise,        s = '?';
+end
+end
+
+%% ========================= BOARD GENERATION =========================
 
 function board = createCatanBoard()
-%CREATECATANBOARD  Full-size randomized Catan board (19 hexes, 54 vertices).
-
 axial    = axialCoordsRadius2();
 numHexes = size(axial, 1);
 sizeHex  = 1.0;
-angles   = deg2rad(30 + (0:5) * 60);
+angles   = deg2rad(30 + (0:5)*60);
 
-resourceBag = [ ...
-    repmat({'wood'},  1, 4), repmat({'brick'}, 1, 3), ...
-    repmat({'sheep'}, 1, 4), repmat({'wheat'}, 1, 4), ...
-    repmat({'ore'},   1, 3), {'desert'}];
+resourceBag = [repmat({'wood'},1,4), repmat({'brick'},1,3), ...
+               repmat({'sheep'},1,4), repmat({'wheat'},1,4), ...
+               repmat({'ore'},1,3), {'desert'}];
 resourceBag = resourceBag(randperm(numel(resourceBag)));
 
 numberBag = [2 12, 3 3, 4 4, 5 5, 6 6, 8 8, 9 9, 10 10, 11 11];
@@ -1057,80 +1607,139 @@ numberBag = numberBag(randperm(numel(numberBag)));
 diceNumbers = zeros(1, numHexes);
 ndx = 1;
 for h = 1:numHexes
-    if strcmp(resourceBag{h}, 'desert')
+    if strcmp(resourceBag{h},'desert')
         diceNumbers(h) = 7;
     else
-        diceNumbers(h) = numberBag(ndx);
-        ndx = ndx + 1;
+        diceNumbers(h) = numberBag(ndx); ndx = ndx + 1;
     end
 end
 
-vertexMap      = containers.Map('KeyType', 'char', 'ValueType', 'int32');
+% Build vertices
+vertexMap      = containers.Map('KeyType','char','ValueType','int32');
 vertexPos      = zeros(0, 2);
 vertexAdjHexes = {};
 hexVertexIds   = zeros(numHexes, 6);
 
 for h = 1:numHexes
-    center = axialToCartesian(axial(h, :), sizeHex);
+    center = axialToCartesian(axial(h,:), sizeHex);
     for k = 1:6
         pos = center + sizeHex * [cos(angles(k)), sin(angles(k))];
         key = vertexKey(pos);
         if ~isKey(vertexMap, key)
-            newId = size(vertexPos, 1) + 1;
+            newId = size(vertexPos,1) + 1;
             vertexMap(key)        = newId;
-            vertexPos(newId, :)   = pos;
+            vertexPos(newId,:)    = pos;
             vertexAdjHexes{newId} = h; %#ok<AGROW>
             vId = newId;
         else
             vId = vertexMap(key);
             vertexAdjHexes{vId} = unique([vertexAdjHexes{vId}, h]);
         end
-        hexVertexIds(h, k) = vId;
+        hexVertexIds(h,k) = vId;
     end
 end
 
 numVertices = size(vertexPos, 1);
+
+% Build adjacency matrix for vertices
 adjMat = false(numVertices);
 for h = 1:numHexes
-    ids = hexVertexIds(h, :);
+    ids = hexVertexIds(h,:);
     for k = 1:6
-        a = ids(k);
-        b = ids(mod(k, 6) + 1);
-        adjMat(a, b) = true;
-        adjMat(b, a) = true;
+        a = ids(k); b = ids(mod(k,6)+1);
+        adjMat(a,b) = true; adjMat(b,a) = true;
     end
 end
 
-vertices = repmat(struct('owner', 0, 'adjHexIds', [], 'adjVertexIds', [], 'pos', [0,0]), ...
-    1, numVertices);
+% Initialize vertex structs
+vertices = repmat(struct('owner',0,'isCity',false,'portType','none', ...
+    'adjHexIds',[],'adjVertexIds',[],'adjEdgeIds',[],'pos',[0,0]), 1, numVertices);
 for v = 1:numVertices
     vertices(v).owner        = 0;
+    vertices(v).isCity       = false;
+    vertices(v).portType     = 'none';
     vertices(v).adjHexIds    = sort(vertexAdjHexes{v});
-    vertices(v).adjVertexIds = find(adjMat(v, :));
-    vertices(v).pos          = vertexPos(v, :);
+    vertices(v).adjVertexIds = find(adjMat(v,:));
+    vertices(v).adjEdgeIds   = [];
+    vertices(v).pos          = vertexPos(v,:);
 end
 
-hexes = repmat(struct('resourceType', '', 'diceNumber', 0, 'vertexIds', zeros(1,6), 'center', [0,0]), ...
+% Build edges
+edgeMap  = containers.Map('KeyType','char','ValueType','int32');
+edgeList = struct('vertexIds',{},'owner',{},'adjHexIds',{});
+eCount   = 0;
+for v1 = 1:numVertices
+    nbrs = find(adjMat(v1,:));
+    for v2 = nbrs
+        if v2 <= v1, continue; end
+        eCount = eCount + 1;
+        key = sprintf('%d_%d', v1, v2);
+        edgeMap(key) = eCount;
+        edgeList(eCount).vertexIds = [v1, v2];
+        edgeList(eCount).owner     = 0;
+        edgeList(eCount).adjHexIds = [];
+        vertices(v1).adjEdgeIds(end+1) = eCount;
+        vertices(v2).adjEdgeIds(end+1) = eCount;
+    end
+end
+
+% Compute adjHexIds for each edge
+for h = 1:numHexes
+    ids = hexVertexIds(h,:);
+    for k = 1:6
+        v1 = min(ids(k), ids(mod(k,6)+1));
+        v2 = max(ids(k), ids(mod(k,6)+1));
+        key = sprintf('%d_%d', v1, v2);
+        if isKey(edgeMap, key)
+            eid = edgeMap(key);
+            edgeList(eid).adjHexIds = unique([edgeList(eid).adjHexIds, h]);
+        end
+    end
+end
+
+% Assign ports to coastal edges (adjacent to exactly 1 hex)
+coastEdgeIds = [];
+for e = 1:eCount
+    if numel(edgeList(e).adjHexIds) == 1
+        coastEdgeIds(end+1) = e; %#ok<AGROW>
+    end
+end
+
+portTypes = {'3to1','3to1','3to1','3to1', ...
+             'wood2to1','brick2to1','sheep2to1','wheat2to1','ore2to1'};
+portTypes = portTypes(randperm(9));
+nPorts    = min(9, numel(coastEdgeIds));
+portEdges = coastEdgeIds(randperm(numel(coastEdgeIds), nPorts));
+for i = 1:nPorts
+    eid  = portEdges(i);
+    pType = portTypes{i};
+    v1   = edgeList(eid).vertexIds(1);
+    v2   = edgeList(eid).vertexIds(2);
+    vertices(v1).portType = pType;
+    vertices(v2).portType = pType;
+end
+
+% Build hex structs
+hexes = repmat(struct('resourceType','','diceNumber',0,'vertexIds',zeros(1,6),'center',[0,0]), ...
     1, numHexes);
 for h = 1:numHexes
     hexes(h).resourceType = resourceBag{h};
     hexes(h).diceNumber   = diceNumbers(h);
-    hexes(h).vertexIds    = hexVertexIds(h, :);
-    hexes(h).center       = axialToCartesian(axial(h, :), sizeHex);
+    hexes(h).vertexIds    = hexVertexIds(h,:);
+    hexes(h).center       = axialToCartesian(axial(h,:), sizeHex);
 end
 
-board = struct('hexes', hexes, 'vertices', vertices);
+board = struct('hexes',hexes,'vertices',vertices,'edges',edgeList,'edgeMap',edgeMap);
 end
 
 function axial = axialCoordsRadius2()
-%AXIALCOORDSRADIUS2  19 axial (q,r) coordinates for a radius-2 hex grid.
 R      = 2;
 coords = zeros(0, 2);
 for q = -R:R
     for r = -R:R
         s = -q - r;
-        if max([abs(q), abs(r), abs(s)]) <= R
-            coords(end + 1, :) = [q, r]; %#ok<AGROW>
+        if max([abs(q),abs(r),abs(s)]) <= R
+            coords(end+1,:) = [q, r]; %#ok<AGROW>
         end
     end
 end
@@ -1138,57 +1747,31 @@ axial = coords;
 end
 
 function xy = axialToCartesian(qr, scale)
-%AXIALTOCARTESIAN  Axial hex coord to 2D XY (pointy-top layout).
-q  = qr(1);
-r  = qr(2);
-xy = scale * [sqrt(3) * (q + r / 2), 1.5 * r];
+q  = qr(1); r = qr(2);
+xy = scale * [sqrt(3)*(q + r/2), 1.5*r];
 end
 
 function key = vertexKey(pos)
-%VERTEXKEY  Stable map key from a vertex position (rounded to 6 decimal places).
-key = sprintf('%.6f_%.6f', round(pos(1), 6), round(pos(2), 6));
+key = sprintf('%.6f_%.6f', round(pos(1),6), round(pos(2),6));
 end
 
 %% ========================= TOURNAMENT =========================
 
 function results = runTournament(agentNames, N, config)
-%RUNTOURNAMENT  Round-robin 2-player tournament across a set of agents.
+%RUNTOURNAMENT  Round-robin 2-player tournament.
 %
-% Usage (from MATLAB command window):
 %   results = catan_core('runTournament', {'random','heuristic','mcts'}, 20)
 %   results = catan_core('runTournament', {'random','heuristic'}, 50, myConfig)
-%
-% agentNames : cell array of agent type strings
-%              ('random', 'heuristic', 'monte_carlo', 'mcts')
-% N          : number of games per ordered matchup (total = 2*N per unordered pair)
-% config     : (optional) base config struct — showViz/pauseAfterMove/verbose
-%              are forced to false/false/false regardless of what you pass
-%
-% Returns a struct with:
-%   results.names          — agent name list
-%   results.winRateMatrix  — winRateMatrix(i,j) = P1-win-rate of agent i vs agent j
-%   results.overallWinRate — overall win rate per agent (P1 + P2 combined)
-%   results.winsAsP1       — total wins as first player per agent
-%   results.winsAsP2       — total wins as second player per agent
-%   results.gamesPerAgent  — total games each agent participated in
 
-if nargin < 3 || isempty(config)
-    config = defaultConfig();
-end
-
-% Tournament always runs silently and without visualization.
+if nargin < 3 || isempty(config), config = defaultConfig(); end
 config.showViz        = false;
 config.pauseAfterMove = false;
 config.verbose        = false;
 
 numAgents = numel(agentNames);
 agentFns  = cell(1, numAgents);
-for i = 1:numAgents
-    agentFns{i} = resolveAgentFn(agentNames{i});
-end
+for i = 1:numAgents, agentFns{i} = resolveAgentFn(agentNames{i}); end
 
-% wins(i,j)   = games P1=agent_i won when matched against P2=agent_j
-% vpSumP1(i,j) = total VP earned by P1 (agent i) in those games
 wins    = zeros(numAgents, numAgents);
 vpSumP1 = zeros(numAgents, numAgents);
 
@@ -1202,127 +1785,85 @@ gameNum     = 0;
 for i = 1:numAgents
     for j = 1:numAgents
         if i == j, continue; end
-
         fprintf('  %s (P1) vs %s (P2) ... ', agentNames{i}, agentNames{j});
-
         for g = 1:N
             gameNum     = gameNum + 1;
             cfg         = config;
             cfg.rngSeed = baseRngSeed + gameNum;
-
-            h = simulateGame( ...
-                {agentFns{i}, agentFns{j}}, cfg, ...
-                {agentNames{i}, agentNames{j}});
-
-            if h.finalState.winnerId == 1        % P1 (agent i) won
-                wins(i, j) = wins(i, j) + 1;
+            h = simulateGame({agentFns{i}, agentFns{j}}, cfg, {agentNames{i}, agentNames{j}});
+            if h.finalState.winnerId == 1
+                wins(i,j) = wins(i,j) + 1;
             end
-            vpSumP1(i, j) = vpSumP1(i, j) + h.finalState.players(1).victoryPoints;
+            vpSumP1(i,j) = vpSumP1(i,j) + h.finalState.players(1).victoryPoints;
         end
-
-        fprintf('%d / %d wins for P1\n', wins(i, j), N);
+        fprintf('%d / %d wins for P1\n', wins(i,j), N);
     end
 end
 
-% ---- Compute statistics ----
-
-winRateMatrix = wins ./ N;   % P1 win-rate for each ordered pair (i,j)
-
-% Overall win rate: wins as P1 + wins as P2 across all matchups.
+winRateMatrix = wins ./ N;
 winsAsP1 = zeros(1, numAgents);
 winsAsP2 = zeros(1, numAgents);
 for i = 1:numAgents
     for j = 1:numAgents
         if i == j, continue; end
-        winsAsP1(i) = winsAsP1(i) + wins(i, j);
-        % In game (j, i), agent i is P2. Wins for P2 = N - wins for P1.
-        winsAsP2(i) = winsAsP2(i) + (N - wins(j, i));
+        winsAsP1(i) = winsAsP1(i) + wins(i,j);
+        winsAsP2(i) = winsAsP2(i) + (N - wins(j,i));
     end
 end
-gamesPerAgent  = (numAgents - 1) * 2 * N;
+gamesPerAgent  = (numAgents-1) * 2 * N;
 overallWinRate = (winsAsP1 + winsAsP2) / gamesPerAgent;
-
-% ---- Print results table ----
 
 namePad = max(cellfun(@numel, agentNames)) + 2;
 colW    = 12;
-
-fprintf('\n--- P1 Win-Rate Matrix (row = P1 agent, col = P2 opponent) ---\n');
+fprintf('\n--- P1 Win-Rate Matrix ---\n');
 fprintf('%*s', namePad, '');
-for j = 1:numAgents
-    fprintf('%-*s', colW, agentNames{j});
-end
+for j = 1:numAgents, fprintf('%-*s', colW, agentNames{j}); end
 fprintf('\n');
 for i = 1:numAgents
     fprintf('%-*s', namePad, agentNames{i});
     for j = 1:numAgents
-        if i == j
-            fprintf('%-*s', colW, '  --');
-        else
-            fprintf('%-*s', colW, sprintf('  %.3f', winRateMatrix(i, j)));
-        end
+        if i == j, fprintf('%-*s', colW, '  --');
+        else, fprintf('%-*s', colW, sprintf('  %.3f', winRateMatrix(i,j))); end
     end
     fprintf('\n');
 end
-
-fprintf('\n--- Overall Win Rate (P1 + P2 combined) ---\n');
+fprintf('\n--- Overall Win Rate ---\n');
 for i = 1:numAgents
-    totalW = winsAsP1(i) + winsAsP2(i);
-    fprintf('  %-15s : %.3f  (%d / %d games)\n', ...
-        agentNames{i}, overallWinRate(i), totalW, gamesPerAgent);
+    fprintf('  %-15s : %.3f  (%d / %d games)\n', agentNames{i}, overallWinRate(i), ...
+        winsAsP1(i)+winsAsP2(i), gamesPerAgent);
 end
 fprintf('========================================\n\n');
 
-% ---- Plot ----
+% Plot
+fig = figure('Name','Tournament Results','NumberTitle','off', ...
+    'Color',[0.10 0.13 0.20],'Position',[80 80 980 460]);
+ax1 = subplot(1,2,1,'Parent',fig);
+b   = bar(ax1, overallWinRate*100); b.FaceColor = 'flat';
+for k = 1:numAgents, b.CData(k,:) = playerDisplayColor(k); end
+set(ax1,'XTick',1:numAgents,'XTickLabel',agentNames, ...
+    'Color',[0.12 0.15 0.22],'XColor',[0.80 0.85 0.90],'YColor',[0.80 0.85 0.90]);
+title(ax1,'Overall Win Rate (%)','Color',[0.95 0.92 0.65],'FontSize',12,'FontWeight','bold');
+ylabel(ax1,'Win %','Color',[0.80 0.85 0.90]); ylim(ax1,[0 100]); grid(ax1,'on');
 
-fig = figure('Name', 'Tournament Results', 'NumberTitle', 'off', ...
-    'Color', [0.10 0.13 0.20], 'Position', [80 80 980 460]);
-
-% Left panel: overall win-rate bar chart.
-ax1 = subplot(1, 2, 1, 'Parent', fig);
-b   = bar(ax1, overallWinRate * 100);
-b.FaceColor = 'flat';
-for k = 1:numAgents
-    b.CData(k, :) = playerDisplayColor(k);
-end
-set(ax1, 'XTick', 1:numAgents, 'XTickLabel', agentNames, ...
-    'Color', [0.12 0.15 0.22], ...
-    'XColor', [0.80 0.85 0.90], 'YColor', [0.80 0.85 0.90], ...
-    'GridColor', [0.30 0.35 0.45]);
-title(ax1, 'Overall Win Rate (%)', ...
-    'Color', [0.95 0.92 0.65], 'FontSize', 12, 'FontWeight', 'bold');
-ylabel(ax1, 'Win %', 'Color', [0.80 0.85 0.90]);
-ylim(ax1, [0 100]);
-grid(ax1, 'on');
-
-% Right panel: P1-win-rate heat map.
-ax2 = subplot(1, 2, 2, 'Parent', fig);
-displayMat = winRateMatrix;
-for k = 1:numAgents
-    displayMat(k, k) = NaN;
-end
-imagesc(ax2, displayMat, [0 1]);
-colormap(ax2, 'cool');
-colorbar(ax2);
-set(ax2, 'XTick', 1:numAgents, 'YTick', 1:numAgents, ...
-    'XTickLabel', agentNames, 'YTickLabel', agentNames, ...
-    'XColor', [0.80 0.85 0.90], 'YColor', [0.80 0.85 0.90]);
-xlabel(ax2, 'P2 (opponent)',    'Color', [0.80 0.85 0.90]);
-ylabel(ax2, 'P1 (row agent)',   'Color', [0.80 0.85 0.90]);
-title(ax2, 'P1 Win Rate vs Opponent', ...
-    'Color', [0.95 0.92 0.65], 'FontSize', 12, 'FontWeight', 'bold');
+ax2 = subplot(1,2,2,'Parent',fig);
+dispMat = winRateMatrix;
+for k = 1:numAgents, dispMat(k,k) = NaN; end
+imagesc(ax2, dispMat,[0 1]); colormap(ax2,'cool'); colorbar(ax2);
+set(ax2,'XTick',1:numAgents,'YTick',1:numAgents, ...
+    'XTickLabel',agentNames,'YTickLabel',agentNames, ...
+    'XColor',[0.80 0.85 0.90],'YColor',[0.80 0.85 0.90]);
+xlabel(ax2,'P2 (opponent)','Color',[0.80 0.85 0.90]);
+ylabel(ax2,'P1 (row agent)','Color',[0.80 0.85 0.90]);
+title(ax2,'P1 Win Rate vs Opponent','Color',[0.95 0.92 0.65],'FontSize',12,'FontWeight','bold');
 for i = 1:numAgents
     for j = 1:numAgents
         if i ~= j
-            text(ax2, j, i, sprintf('%.2f', winRateMatrix(i, j)), ...
-                'HorizontalAlignment', 'center', ...
-                'Color', 'w', 'FontWeight', 'bold', 'FontSize', 10);
+            text(ax2, j, i, sprintf('%.2f', winRateMatrix(i,j)), ...
+                'HorizontalAlignment','center','Color','w','FontWeight','bold','FontSize',10);
         end
     end
 end
 drawnow;
-
-% ---- Pack results ----
 
 results.names          = agentNames;
 results.winRateMatrix  = winRateMatrix;
@@ -1334,12 +1875,11 @@ results.vpSumP1        = vpSumP1;
 end
 
 function fn = resolveAgentFn(name)
-%RESOLVEAGENTFN  Map an agent name string to its function handle.
 switch lower(name)
-    case 'random',       fn = @agent_random;
-    case 'heuristic',    fn = @agent_heuristic;
-    case 'monte_carlo',  fn = @agent_montecarlo;
-    case 'mcts',         fn = @agent_mcts;
+    case 'random',      fn = @agent_random;
+    case 'heuristic',   fn = @agent_heuristic;
+    case 'monte_carlo', fn = @agent_montecarlo;
+    case 'mcts',        fn = @agent_mcts;
     otherwise
         error('Unknown agent "%s". Choose from: random, heuristic, monte_carlo, mcts.', name);
 end

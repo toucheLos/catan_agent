@@ -1,41 +1,49 @@
-open agenfunction action = agent_montecarlo(state, legalActions, playerId, config)
-%AGENT_MONTECARLO Flat Monte Carlo rollouts over legal actions.
+function action = agent_montecarlo(state, legalActions, playerId, config)
+%AGENT_MONTECARLO  Flat Monte Carlo rollouts over legal actions.
 
-rolloutCount = config.rolloutCount;
+rolloutCount   = config.rolloutCount;
 rolloutHorizon = config.rolloutHorizon;
 
-bestValue = -inf;
+bestValue  = -inf;
 bestAction = catan_core('makeAction', 'pass', 0);
 
 for i = 1:numel(legalActions)
-    candidate = legalActions(i);
+    candidate  = legalActions(i);
     totalValue = 0;
 
     for r = 1:rolloutCount
-        rolloutState = state;
-        rolloutState = catan_core('applyAction', rolloutState, playerId, candidate, config);
+        rolloutState = catan_core('applyAction', state, playerId, candidate, config);
 
         [done, winnerId] = catan_core('checkTerminal', rolloutState, config);
         rolloutState.isTerminal = done;
-        rolloutState.winnerId = winnerId;
+        rolloutState.winnerId   = winnerId;
 
-        if ~rolloutState.isTerminal && strcmp(candidate.type, 'build_settlement')
+        % Finish current player's turn
+        if ~rolloutState.isTerminal
             rolloutState = continueTurnWithPolicy(rolloutState, playerId, config.mc.selfRolloutPolicy, config);
         end
 
         if ~rolloutState.isTerminal
             rolloutState.currentPlayer = mod(playerId, config.numPlayers) + 1;
-            rolloutState.turnIndex = rolloutState.turnIndex + 1;
+            rolloutState.turnIndex     = rolloutState.turnIndex + 1;
         end
 
+        % Simulate forward
         for t = 1:rolloutHorizon
-            if rolloutState.isTerminal
-                break;
-            end
+            if rolloutState.isTerminal, break; end
 
             cp = rolloutState.currentPlayer;
-            rolloutState.lastRoll = catan_core('rollDice');
-            rolloutState = catan_core('distributeResources', rolloutState, rolloutState.lastRoll, config);
+
+            % Roll and handle 7
+            roll = catan_core('rollDice');
+            rolloutState.lastRoll = roll;
+            if roll == 7
+                rolloutState = catan_core('autoRobber', rolloutState, cp, config);
+            else
+                rolloutState = catan_core('distributeResources', rolloutState, roll, config);
+            end
+
+            rolloutState.devCardPlayedThisTurn = false;
 
             if cp == playerId
                 policy = config.mc.selfRolloutPolicy;
@@ -47,10 +55,10 @@ for i = 1:numel(legalActions)
 
             if ~rolloutState.isTerminal
                 rolloutState.currentPlayer = mod(cp, config.numPlayers) + 1;
-                rolloutState.turnIndex = rolloutState.turnIndex + 1;
+                rolloutState.turnIndex     = rolloutState.turnIndex + 1;
                 [done, winnerId] = catan_core('checkTerminal', rolloutState, config);
                 rolloutState.isTerminal = done;
-                rolloutState.winnerId = winnerId;
+                rolloutState.winnerId   = winnerId;
             end
         end
 
@@ -59,29 +67,35 @@ for i = 1:numel(legalActions)
 
     value = totalValue / rolloutCount;
     if value > bestValue
-        bestValue = value;
+        bestValue  = value;
         bestAction = candidate;
     end
 end
 
 action = bestAction;
-
 end
 
+% =========================================================================
+
 function state = continueTurnWithPolicy(state, playerId, policyName, config)
-actionCap = numel(state.board.vertices) + 1;
+state.devCardPlayedThisTurn = false;
+
+actionCap = 30;
 for step = 1:actionCap
     legalActions = catan_core('enumerateLegalActions', state, playerId, config);
-    action = selectPolicyAction(policyName, state, legalActions, playerId, config);
+    action       = selectPolicyAction(policyName, state, legalActions, playerId, config);
+
+    if strcmp(action.type,'pass') && state.freeRoads == 0
+        return;
+    end
+
     state = catan_core('applyAction', state, playerId, action, config);
 
     [done, winnerId] = catan_core('checkTerminal', state, config);
     state.isTerminal = done;
-    state.winnerId = winnerId;
+    state.winnerId   = winnerId;
 
-    if done || ~strcmp(action.type, 'build_settlement')
-        return;
-    end
+    if done, return; end
 end
 end
 
@@ -92,31 +106,23 @@ switch lower(policyName)
     otherwise
         action = agent_random(state, legalActions, playerId, config);
 end
-
 if ~catan_core('isLegalAction', action, legalActions)
     action = catan_core('makeAction', 'pass', 0);
 end
 end
 
 function u = rolloutUtility(state, rootPlayer)
-myVP = state.players(rootPlayer).victoryPoints;
-allVP = [state.players.victoryPoints];
+myVP   = state.players(rootPlayer).victoryPoints;
+allVP  = [state.players.victoryPoints];
 oppIdx = setdiff(1:numel(allVP), rootPlayer);
-if isempty(oppIdx)
-    maxOppVP = myVP;
-else
-    maxOppVP = max(allVP(oppIdx));
-end
-vpLead = myVP - maxOppVP;
+maxOppVP = isempty(oppIdx) * myVP + ~isempty(oppIdx) * max(allVP(oppIdx));
+vpLead   = myVP - maxOppVP;
 
 winBonus = 0;
 if state.isTerminal
-    if state.winnerId == rootPlayer
-        winBonus = 1.0;
-    elseif state.winnerId ~= 0
-        winBonus = -1.0;
+    if     state.winnerId == rootPlayer, winBonus =  1.0;
+    elseif state.winnerId ~= 0,          winBonus = -1.0;
     end
 end
-
 u = winBonus + 0.10 * vpLead;
 end

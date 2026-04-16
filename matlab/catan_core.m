@@ -17,7 +17,7 @@ function varargout = catan_core(command, varargin)
 %   p       = catan_core('diceProbability', n)
 %   vp      = catan_core('computeVP', state, playerId)
 %   state   = catan_core('autoRobber', state, playerId, config)
-%   results = catan_core('runTournament', agentNames, N, config)
+%   state   = catan_core('advanceDevCards', state, playerId)
 
     if nargin == 0
         runGame();
@@ -37,30 +37,30 @@ function varargout = catan_core(command, varargin)
         case 'diceprobability',          varargout{1} = diceProbability(varargin{1});
         case 'computevp',                varargout{1} = computeVP(varargin{:});
         case 'autorobber',               varargout{1} = autoRobber(varargin{:});
+        case 'advancedevcards',          varargout{1} = advanceDevCards(varargin{:});
         case 'enumeraterobberactions',   varargout{1} = enumerateRobberActions(varargin{:});
         case 'rungame',                  runGame();
-        case 'runtournament',            varargout{1} = runTournament(varargin{:});
         otherwise
             error('Unknown catan_core command: %s', command);
     end
 end
 
-%% ========================= ENTRY POINT =========================
+%% ENTRY POINT
 
 function runGame()
 %RUNGAME  Main entry point. Edit PARAMS below, then run: catan_core
 %
 % Player types: 'random' | 'heuristic' | 'monte_carlo' | 'mcts' | 'live'
 
-PARAMS.players        = {'heuristic', 'random'};
+PARAMS.players        = {'monte_carlo', 'heuristic', 'random'};
 PARAMS.pauseAfterMove = true;
-PARAMS.rngSeed        = 42;
+PARAMS.rngSeed        = 0;  % 0 = random board each run; set a fixed int for reproducibility
 PARAMS.winVP          = 10;
 PARAMS.maxTurns       = 300;
 PARAMS.showViz        = true;
-PARAMS.mc.rolloutCount          = 15;
-PARAMS.mc.rolloutHorizon        = 25;
-PARAMS.mc.selfRolloutPolicy     = 'heuristic';
+PARAMS.mc.rolloutCount  = 50;
+PARAMS.mc.rolloutHorizon  = 10;
+PARAMS.mc.selfRolloutPolicy = 'heuristic';
 PARAMS.mc.opponentRolloutPolicy = 'random';
 
 config               = defaultConfig();
@@ -128,7 +128,7 @@ config.buildCosts.devCard     = [0 0 1 1 1];
 config.initialResources       = [0 0 0 0 0];
 config.initialFreeSettlements = 2;
 config.enforceDistanceRule    = true;
-config.rngSeed                = 42;
+config.rngSeed                = 0;  % 0 = random; fixed int = reproducible
 config.pauseAfterMove         = false;
 config.showViz                = true;
 config.rolloutCount           = 15;
@@ -143,6 +143,7 @@ config.heuristic.wBlocking           = 0.2;
 config.heuristic.wRoad               = 1.8;
 config.heuristic.wCity               = 2.5;
 config.mcts.C                 = sqrt(2);
+config.mcts.depth             = 2;
 end
 
 %% ========================= GAME LOOP =========================
@@ -292,7 +293,11 @@ end
 %% ========================= INITIALIZATION =========================
 
 function state = initGame(config)
-rng(config.rngSeed, 'twister');
+if config.rngSeed == 0
+    rng('shuffle');   % truly random seed based on clock
+else
+    rng(config.rngSeed, 'twister');
+end
 
 board      = createCatanBoard();
 numP       = config.numPlayers;
@@ -307,7 +312,7 @@ players = repmat(struct( ...
     'devCards',emptyDevCards, 'newDevCards',emptyDevCards), 1, numP);
 
 for p = 1:numP
-    players(p).id        = p;
+    players(p).id = p;
     players(p).resources = config.initialResources;
     players(p).devCards    = emptyDevCards;
     players(p).newDevCards = emptyDevCards;
@@ -327,7 +332,7 @@ for h = 1:numel(board.hexes)
     end
 end
 
-state                     = struct();
+state  = struct();
 state.turnIndex           = 1;
 state.currentPlayer       = 1;
 state.board               = board;
@@ -341,6 +346,7 @@ state.devCardPlayedThisTurn = false;
 state.devCardDeck         = deck;
 state.longestRoadPlayer   = 0;
 state.largestArmyPlayer   = 0;
+state.placementPhase      = false;
 end
 
 %% ========================= INITIAL PLACEMENT =========================
@@ -350,6 +356,8 @@ P         = config.numPlayers;
 K         = config.initialFreeSettlements;   % typically 2
 useViz    = ~isempty(fig);
 doVerbose = ~isfield(config,'verbose') || config.verbose;
+
+state.placementPhase = true;
 
 if doVerbose
     fprintf('=== Initial Placement (%d settlements + roads each, snake draft) ===\n', K);
@@ -399,8 +407,10 @@ for idx = 1:numel(order)
                 highlightLegalActions(fig, roadLegal, state);
             end
             ra = agentFns{p}(state, roadLegal, p, config);
-            if ~isLegalAction(ra, roadLegal)
-                ra = roadLegal(1);
+            if ~isLegalAction(ra, roadLegal) || strcmp(ra.type,'pass')
+                % Force a road — pick first build_road action in the list
+                roads = roadLegal(arrayfun(@(x) strcmp(x.type,'build_road'), roadLegal));
+                if ~isempty(roads), ra = roads(1); else, ra = roadLegal(1); end
             end
             state = applyFreeRoad(state, p, ra);
             if doVerbose && strcmp(ra.type,'build_road')
@@ -418,6 +428,8 @@ for idx = 1:numel(order)
         input('  [Press Enter to continue]','s');
     end
 end
+
+state.placementPhase = false;
 
 if doVerbose
     fprintf('=== Placement complete. Starting game. ===\n\n');
@@ -461,11 +473,15 @@ end
 end
 
 function legal = enumerateFreeRoadsAt(state, vertexId)
-legal = makeAction('pass', 0);
+% Road placement is mandatory — no pass included so agents can't skip it.
+legal = [];
 for e = state.board.vertices(vertexId).adjEdgeIds
     if state.board.edges(e).owner ~= 0, continue; end
     a = makeAction('build_road'); a.edgeId = e;
     legal(end+1) = a; %#ok<AGROW>
+end
+if isempty(legal)
+    legal = makeAction('pass', 0);  % only if truly no free edges exist
 end
 end
 
@@ -671,9 +687,12 @@ if config.enforceDistanceRule
     nbrs = state.board.vertices(v).adjVertexIds;
     if any([state.board.vertices(nbrs).owner] ~= 0), return; end
 end
-if ~canAfford(state.players(playerId).resources, config.buildCosts.settlement), return; end
-state.players(playerId).resources = ...
-    state.players(playerId).resources - config.buildCosts.settlement;
+isFreePlacement = isfield(state,'placementPhase') && state.placementPhase;
+if ~isFreePlacement
+    if ~canAfford(state.players(playerId).resources, config.buildCosts.settlement), return; end
+    state.players(playerId).resources = ...
+        state.players(playerId).resources - config.buildCosts.settlement;
+end
 state.board.vertices(v).owner  = playerId;
 state.board.vertices(v).isCity = false;
 state.players(playerId).settlementCount = state.players(playerId).settlementCount + 1;
@@ -1398,24 +1417,71 @@ for v = 1:numel(board.vertices)
         pos = board.vertices(v).pos;
         pc  = playerDisplayColor(owner);
         if board.vertices(v).isCity
-            % Diamond marker for city
-            plot(ax, pos(1), pos(2), 'd', 'MarkerSize',20, ...
-                'MarkerFaceColor',pc,'MarkerEdgeColor',[0.95 0.95 0.95],'LineWidth',2.0);
-            text(ax, pos(1), pos(2), [num2str(owner) 'C'], ...
-                'HorizontalAlignment','center','VerticalAlignment','middle', ...
-                'FontSize',6,'FontWeight','bold','Color','w');
+            drawCity(ax, pos, owner, pc);
         else
-            % Square marker for settlement
-            plot(ax, pos(1), pos(2), 's', 'MarkerSize',16, ...
-                'MarkerFaceColor',pc,'MarkerEdgeColor',[0.95 0.95 0.95],'LineWidth',1.8);
-            text(ax, pos(1), pos(2), num2str(owner), ...
-                'HorizontalAlignment','center','VerticalAlignment','middle', ...
-                'FontSize',7,'FontWeight','bold','Color','w');
+            drawSettlement(ax, pos, owner, pc);
         end
     end
 end
 
 title(ax,'Catan Board','Color',[0.90 0.92 0.95],'FontSize',13,'FontWeight','bold');
+end
+
+function drawSettlement(ax, pos, owner, pc)
+%DRAWSETTLEMENT  House-shaped polygon for a settlement.
+sx = pos(1); sy = pos(2);
+w = 0.30; wh = 0.19; rh = 0.16;
+% Thin dark shadow for depth
+hxs = [sx-w/2+0.02, sx+w/2+0.02, sx+w/2+0.02, sx+0.02, sx-w/2+0.02];
+hys = [sy-wh/2-0.02, sy-wh/2-0.02, sy+wh/2-0.02, sy+wh/2+rh-0.02, sy+wh/2-0.02];
+patch(ax, hxs, hys, [0.05 0.05 0.05], 'EdgeColor','none', 'FaceAlpha',0.5);
+% House body
+hx = [sx-w/2, sx+w/2, sx+w/2, sx, sx-w/2];
+hy = [sy-wh/2, sy-wh/2, sy+wh/2, sy+wh/2+rh, sy+wh/2];
+patch(ax, hx, hy, pc, 'EdgeColor',[1 1 1], 'LineWidth',2.0);
+% Door
+patch(ax, sx+[-0.05 0.05 0.05 -0.05], sy+[-wh/2 -wh/2 -wh/2+0.10 -wh/2+0.10], ...
+    pc*0.6, 'EdgeColor',[1 1 1],'LineWidth',0.8);
+% Player label
+text(ax, sx, sy+0.02, sprintf('P%d', owner), 'HorizontalAlignment','center', ...
+    'VerticalAlignment','middle','FontSize',7,'FontWeight','bold','Color','w');
+end
+
+function drawCity(ax, pos, owner, pc)
+%DRAWCITY  Castle-shaped polygon (wider, with battlements) for a city.
+sx = pos(1); sy = pos(2);
+w = 0.42; wh = 0.24; rh = 0.19; mw = 0.10; mh = 0.10;
+% Gold glow behind city
+glow = 0.06;
+gx = [sx-w/2-glow, sx+w/2+glow, sx+w/2+glow, sx+glow, sx-glow, sx-w/2-glow];
+gy = [sy-wh/2-glow, sy-wh/2-glow, sy+wh/2+glow, sy+wh/2+rh+glow, sy+wh/2+rh+glow, sy+wh/2+glow];
+% Simple gold rectangle glow
+patch(ax, [sx-w/2-glow, sx+w/2+glow, sx+w/2+glow, sx-w/2-glow], ...
+    [sy-wh/2-glow, sy-wh/2-glow, sy+wh/2+rh+glow, sy+wh/2+rh+glow], ...
+    [0.95 0.80 0.15], 'EdgeColor','none', 'FaceAlpha',0.55); %#ok<NASGU>
+% Shadow
+patch(ax, [sx-w/2+0.02, sx+w/2+0.02, sx+w/2+0.02, sx-w/2+0.02], ...
+    [sy-wh/2-0.02, sy-wh/2-0.02, sy+wh/2+rh-0.02, sy+wh/2+rh-0.02], ...
+    [0.05 0.05 0.05], 'EdgeColor','none', 'FaceAlpha',0.45);
+% Main building body
+patch(ax, [sx-w/2, sx+w/2, sx+w/2, sx-w/2], [sy-wh/2, sy-wh/2, sy+wh/2, sy+wh/2], ...
+    pc, 'EdgeColor',[0.95 0.80 0.15], 'LineWidth',2.5);
+% Roof (triangle)
+patch(ax, [sx-w/2, sx+w/2, sx], [sy+wh/2, sy+wh/2, sy+wh/2+rh], ...
+    pc*0.85, 'EdgeColor',[0.95 0.80 0.15], 'LineWidth',2.5);
+% Battlements (3 merlons across the top of the walls)
+for mx = [sx-w/2, sx-mw/2, sx+w/2-mw]
+    patch(ax, mx+[0 mw mw 0], sy+wh/2+[-0.01 -0.01 mh-0.01 mh-0.01], ...
+        pc, 'EdgeColor',[0.95 0.80 0.15], 'LineWidth',1.2);
+end
+% Door
+patch(ax, sx+[-0.06 0.06 0.06 -0.06], sy+[-wh/2 -wh/2 -wh/2+0.12 -wh/2+0.12], ...
+    pc*0.5, 'EdgeColor',[0.95 0.80 0.15], 'LineWidth',1.0);
+% Player + city label
+text(ax, sx, sy+0.01, sprintf('P%d', owner), 'HorizontalAlignment','center', ...
+    'VerticalAlignment','middle','FontSize',7,'FontWeight','bold','Color','w');
+text(ax, sx, sy+wh/2+rh+0.10, 'CITY', 'HorizontalAlignment','center', ...
+    'VerticalAlignment','middle','FontSize',5.5,'FontWeight','bold','Color',[0.95 0.80 0.15]);
 end
 
 % -----------------------------------------------------------------
@@ -1753,125 +1819,6 @@ end
 
 function key = vertexKey(pos)
 key = sprintf('%.6f_%.6f', round(pos(1),6), round(pos(2),6));
-end
-
-%% ========================= TOURNAMENT =========================
-
-function results = runTournament(agentNames, N, config)
-%RUNTOURNAMENT  Round-robin 2-player tournament.
-%
-%   results = catan_core('runTournament', {'random','heuristic','mcts'}, 20)
-%   results = catan_core('runTournament', {'random','heuristic'}, 50, myConfig)
-
-if nargin < 3 || isempty(config), config = defaultConfig(); end
-config.showViz        = false;
-config.pauseAfterMove = false;
-config.verbose        = false;
-
-numAgents = numel(agentNames);
-agentFns  = cell(1, numAgents);
-for i = 1:numAgents, agentFns{i} = resolveAgentFn(agentNames{i}); end
-
-wins    = zeros(numAgents, numAgents);
-vpSumP1 = zeros(numAgents, numAgents);
-
-fprintf('\n========================================\n');
-fprintf('  TOURNAMENT  (%d games per matchup)\n', N);
-fprintf('========================================\n');
-
-baseRngSeed = config.rngSeed;
-gameNum     = 0;
-
-for i = 1:numAgents
-    for j = 1:numAgents
-        if i == j, continue; end
-        fprintf('  %s (P1) vs %s (P2) ... ', agentNames{i}, agentNames{j});
-        for g = 1:N
-            gameNum     = gameNum + 1;
-            cfg         = config;
-            cfg.rngSeed = baseRngSeed + gameNum;
-            h = simulateGame({agentFns{i}, agentFns{j}}, cfg, {agentNames{i}, agentNames{j}});
-            if h.finalState.winnerId == 1
-                wins(i,j) = wins(i,j) + 1;
-            end
-            vpSumP1(i,j) = vpSumP1(i,j) + h.finalState.players(1).victoryPoints;
-        end
-        fprintf('%d / %d wins for P1\n', wins(i,j), N);
-    end
-end
-
-winRateMatrix = wins ./ N;
-winsAsP1 = zeros(1, numAgents);
-winsAsP2 = zeros(1, numAgents);
-for i = 1:numAgents
-    for j = 1:numAgents
-        if i == j, continue; end
-        winsAsP1(i) = winsAsP1(i) + wins(i,j);
-        winsAsP2(i) = winsAsP2(i) + (N - wins(j,i));
-    end
-end
-gamesPerAgent  = (numAgents-1) * 2 * N;
-overallWinRate = (winsAsP1 + winsAsP2) / gamesPerAgent;
-
-namePad = max(cellfun(@numel, agentNames)) + 2;
-colW    = 12;
-fprintf('\n--- P1 Win-Rate Matrix ---\n');
-fprintf('%*s', namePad, '');
-for j = 1:numAgents, fprintf('%-*s', colW, agentNames{j}); end
-fprintf('\n');
-for i = 1:numAgents
-    fprintf('%-*s', namePad, agentNames{i});
-    for j = 1:numAgents
-        if i == j, fprintf('%-*s', colW, '  --');
-        else, fprintf('%-*s', colW, sprintf('  %.3f', winRateMatrix(i,j))); end
-    end
-    fprintf('\n');
-end
-fprintf('\n--- Overall Win Rate ---\n');
-for i = 1:numAgents
-    fprintf('  %-15s : %.3f  (%d / %d games)\n', agentNames{i}, overallWinRate(i), ...
-        winsAsP1(i)+winsAsP2(i), gamesPerAgent);
-end
-fprintf('========================================\n\n');
-
-% Plot
-fig = figure('Name','Tournament Results','NumberTitle','off', ...
-    'Color',[0.10 0.13 0.20],'Position',[80 80 980 460]);
-ax1 = subplot(1,2,1,'Parent',fig);
-b   = bar(ax1, overallWinRate*100); b.FaceColor = 'flat';
-for k = 1:numAgents, b.CData(k,:) = playerDisplayColor(k); end
-set(ax1,'XTick',1:numAgents,'XTickLabel',agentNames, ...
-    'Color',[0.12 0.15 0.22],'XColor',[0.80 0.85 0.90],'YColor',[0.80 0.85 0.90]);
-title(ax1,'Overall Win Rate (%)','Color',[0.95 0.92 0.65],'FontSize',12,'FontWeight','bold');
-ylabel(ax1,'Win %','Color',[0.80 0.85 0.90]); ylim(ax1,[0 100]); grid(ax1,'on');
-
-ax2 = subplot(1,2,2,'Parent',fig);
-dispMat = winRateMatrix;
-for k = 1:numAgents, dispMat(k,k) = NaN; end
-imagesc(ax2, dispMat,[0 1]); colormap(ax2,'cool'); colorbar(ax2);
-set(ax2,'XTick',1:numAgents,'YTick',1:numAgents, ...
-    'XTickLabel',agentNames,'YTickLabel',agentNames, ...
-    'XColor',[0.80 0.85 0.90],'YColor',[0.80 0.85 0.90]);
-xlabel(ax2,'P2 (opponent)','Color',[0.80 0.85 0.90]);
-ylabel(ax2,'P1 (row agent)','Color',[0.80 0.85 0.90]);
-title(ax2,'P1 Win Rate vs Opponent','Color',[0.95 0.92 0.65],'FontSize',12,'FontWeight','bold');
-for i = 1:numAgents
-    for j = 1:numAgents
-        if i ~= j
-            text(ax2, j, i, sprintf('%.2f', winRateMatrix(i,j)), ...
-                'HorizontalAlignment','center','Color','w','FontWeight','bold','FontSize',10);
-        end
-    end
-end
-drawnow;
-
-results.names          = agentNames;
-results.winRateMatrix  = winRateMatrix;
-results.overallWinRate = overallWinRate;
-results.winsAsP1       = winsAsP1;
-results.winsAsP2       = winsAsP2;
-results.gamesPerAgent  = gamesPerAgent;
-results.vpSumP1        = vpSumP1;
 end
 
 function fn = resolveAgentFn(name)

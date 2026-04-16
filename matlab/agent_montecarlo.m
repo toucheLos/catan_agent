@@ -1,7 +1,9 @@
 function action = agent_montecarlo(state, legalActions, playerId, config)
 %AGENT_MONTECARLO  Flat Monte Carlo rollouts over legal actions.
 
+% Count: Number of rollouts per action.
 rolloutCount   = config.rolloutCount;
+% Horizon: Number of turns to simulate after the current one.
 rolloutHorizon = config.rolloutHorizon;
 
 bestValue  = -inf;
@@ -13,6 +15,7 @@ for i = 1:numel(legalActions)
 
     for r = 1:rolloutCount
         rolloutState = catan_core('applyAction', state, playerId, candidate, config);
+        rolloutState.placementPhase = false;
 
         [done, winnerId] = catan_core('checkTerminal', rolloutState, config);
         rolloutState.isTerminal = done;

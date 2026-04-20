@@ -23,7 +23,7 @@ visitCounts = zeros(1, numActions);
 totalValues = zeros(1, numActions);
 
 % Seed: one rollout per action
-for i = 1:numActions
+parfor i = 1:numActions
     totalValues(i) = mctsDeepRollout(state, legalActions(i), playerId, playerId, depth, rolloutHorizon, config);
     visitCounts(i) = 1;
 end
@@ -47,7 +47,7 @@ end
 % =========================================================================
 
 function u = mctsDeepRollout(state, candidate, actingPlayer, rootPlayer, depth, rolloutHorizon, config)
-% Apply candidate action, finish actingPlayer's turn, then simulate `depth`
+% Apply candidate action, finish actingPlayers turn, then simulate 'depth'
 % full turns with heuristic/policy before falling through to flat rollout.
 
 state = catan_core('applyAction', state, actingPlayer, candidate, config);
@@ -176,9 +176,9 @@ maxOppVP = isempty(oppIdx) * myVP + ~isempty(oppIdx) * max(allVP(oppIdx));
 vpLead   = myVP - maxOppVP;
 winBonus = 0;
 if state.isTerminal
-    if     state.winnerId == rootPlayer, winBonus =  1.0;
+    if state.winnerId == rootPlayer, winBonus =  1.0;
     elseif state.winnerId ~= 0,          winBonus = -1.0;
     end
 end
-u = winBonus + 0.10 * vpLead;
+u = winBonus + 0.50 * vpLead;
 end

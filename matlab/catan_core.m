@@ -474,7 +474,7 @@ end
 
 function legal = enumerateFreeRoadsAt(state, vertexId)
 % Road placement is mandatory — no pass included so agents can't skip it.
-legal = [];
+legal = repmat(makeAction('build_road'), 1, 0);
 for e = state.board.vertices(vertexId).adjEdgeIds
     if state.board.edges(e).owner ~= 0, continue; end
     a = makeAction('build_road'); a.edgeId = e;

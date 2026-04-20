@@ -13,7 +13,7 @@ for i = 1:numel(legalActions)
     candidate  = legalActions(i);
     totalValue = 0;
 
-    for r = 1:rolloutCount
+    parfor r = 1:rolloutCount
         rolloutState = catan_core('applyAction', state, playerId, candidate, config);
         rolloutState.placementPhase = false;
 

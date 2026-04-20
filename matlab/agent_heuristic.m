@@ -158,8 +158,8 @@ function bonus = longestRoadProgress(state, playerId, edgeId)
 % Small bonus if this road extends toward matching/beating opponent road length
 tempState = state;
 tempState.board.edges(edgeId).owner = playerId;
-myLen  = computeLongestRoadLen(tempState, playerId);
-curLen = computeLongestRoadLen(state, playerId);
+myLen  = catan_core('longestroadlen', tempState, playerId);
+curLen = catan_core('longestroadlen', state, playerId);
 if myLen > curLen
     bonus = 0.15 * (myLen - curLen);
     % Extra bonus if this crosses threshold 5 (longest road claim)
@@ -244,7 +244,7 @@ end
 function score = scoreTrade(state, playerId, action, config)
 giveIdx  = find(strcmp(config.resourceNames, action.resourceType), 1);
 recvIdx  = find(strcmp(config.resourceNames, action.resource2), 1);
-rates    = getTradeRates(state, playerId, config);
+rates    = catan_core('traderates', state, playerId, config);
 rate     = rates(giveIdx);
 player   = state.players(playerId);
 
@@ -256,19 +256,7 @@ resAfter(recvIdx) = resAfter(recvIdx) + 1;
 if resAfter(giveIdx) < 0, score = -2.0; return; end  % can't afford
 
 % --- Build completion check (highest priority) ---
-% Does this trade let us build something we couldn't before?
-buildValues = [2.5, 0.8, 2.0, 1.0];  % settlement, road, city, devCard
-buildCosts  = {config.buildCosts.settlement, config.buildCosts.road, ...
-               config.buildCosts.city, config.buildCosts.devCard};
-
-completionBonus = 0;
-for b = 1:4
-    couldBefore = canAffordCheck(player.resources, buildCosts{b});
-    canNow      = canAffordCheck(resAfter, buildCosts{b});
-    if canNow && ~couldBefore
-        completionBonus = completionBonus + buildValues(b);
-    end
-end
+completionBonus = buildCompletionBonus(player.resources, resAfter, config);
 if completionBonus > 0
     % Discount by trade cost (4:1 is expensive; 2:1 is essentially free)
     score = completionBonus - (rate - 2) * 0.3;
@@ -334,7 +322,7 @@ function score = scoreRoadBuilding(state, playerId, config)
 % Value = sum of best 2 production-weighted road scores
 roadScores = [];
 for e = 1:numel(state.board.edges)
-    if canBuildRoadAtEdge(state, playerId, e)
+    if catan_core('canbuildroad', state, playerId, e)
         roadScores(end+1) = scoreRoad(state, playerId, e, config); %#ok<AGROW>
     end
 end
@@ -362,18 +350,7 @@ resAfter(r1) = resAfter(r1) + 1;
 resAfter(r2) = resAfter(r2) + 1;
 
 % Check if this enables a build
-buildValues = [2.5, 0.8, 2.0, 1.0];
-buildCosts  = {config.buildCosts.settlement, config.buildCosts.road, ...
-               config.buildCosts.city, config.buildCosts.devCard};
-
-completionBonus = 0;
-for b = 1:4
-    couldBefore = canAffordCheck(player.resources, buildCosts{b});
-    canNow      = canAffordCheck(resAfter, buildCosts{b});
-    if canNow && ~couldBefore
-        completionBonus = completionBonus + buildValues(b);
-    end
-end
+completionBonus = buildCompletionBonus(player.resources, resAfter, config);
 
 if completionBonus > 0
     score = completionBonus + 0.5;  % free resources are always good
@@ -413,60 +390,11 @@ function tf = canAffordCheck(resources, cost)
 tf = all(resources >= cost);
 end
 
-function n = countNewSettlementSpots(state, playerId, edgeId, config)
-tempState = state;
-tempState.board.edges(edgeId).owner = playerId;
-n = 0;
-for v = 1:numel(tempState.board.vertices)
-    if tempState.board.vertices(v).owner ~= 0, continue; end
-    if config.enforceDistanceRule
-        ok = true;
-        for nv = tempState.board.vertices(v).adjVertexIds
-            if tempState.board.vertices(nv).owner ~= 0, ok = false; break; end
-        end
-        if ~ok, continue; end
-    end
-    if hasRoadAtVertex(tempState, playerId, v) && ~hasRoadAtVertex(state, playerId, v)
-        n = n + 1;
-    end
-end
-end
-
 function tf = hasRoadAtVertex(state, playerId, v)
 for e = state.board.vertices(v).adjEdgeIds
     if state.board.edges(e).owner == playerId, tf = true; return; end
 end
 tf = false;
-end
-
-function tf = canBuildRoadAtEdge(state, playerId, e)
-tf = false;
-if state.board.edges(e).owner ~= 0, return; end
-vPair = state.board.edges(e).vertexIds;
-for k = 1:2
-    v = vPair(k);
-    if state.board.vertices(v).owner == playerId, tf = true; return; end
-    if state.board.vertices(v).owner ~= 0, continue; end
-    for e2 = state.board.vertices(v).adjEdgeIds
-        if e2 ~= e && state.board.edges(e2).owner == playerId, tf = true; return; end
-    end
-end
-end
-
-function rates = getTradeRates(state, playerId, config)
-rates = 4 * ones(1, numel(config.resourceNames));
-for v = 1:numel(state.board.vertices)
-    if state.board.vertices(v).owner ~= playerId, continue; end
-    port = state.board.vertices(v).portType;
-    if strcmp(port,'none'), continue; end
-    if strcmp(port,'3to1')
-        rates = min(rates, 3);
-    else
-        rName = port(1:end-4);
-        rIdx  = find(strcmp(config.resourceNames, rName), 1);
-        if ~isempty(rIdx), rates(rIdx) = min(rates(rIdx), 2); end
-    end
-end
 end
 
 function coverage = currentCoverage(state, playerId, config)
@@ -480,47 +408,15 @@ for v = 1:numel(state.board.vertices)
 end
 end
 
-function len = computeLongestRoadLen(state, playerId)
-% Local copy of the road DFS for scoring purposes
-board = state.board;
-if ~isfield(board,'edges') || isempty(board.edges), len = 0; return; end
-numEdges = numel(board.edges);
-hasPEdge = false;
-for e = 1:numEdges
-    if board.edges(e).owner == playerId, hasPEdge = true; break; end
-end
-if ~hasPEdge, len = 0; return; end
-allV = [];
-for e = 1:numEdges
-    if board.edges(e).owner == playerId
-        allV = [allV, board.edges(e).vertexIds]; %#ok<AGROW>
+function bonus = buildCompletionBonus(resBefore, resAfter, config)
+buildValues = [2.5, 0.8, 2.0, 1.0];
+buildCosts  = {config.buildCosts.settlement, config.buildCosts.road, ...
+               config.buildCosts.city, config.buildCosts.devCard};
+bonus = 0;
+for b = 1:4
+    if canAffordCheck(resAfter, buildCosts{b}) && ~canAffordCheck(resBefore, buildCosts{b})
+        bonus = bonus + buildValues(b);
     end
-end
-startVerts = unique(allV);
-len = 0;
-usedE = false(1, numEdges);
-for sv = startVerts
-    l = dfsRoadLocal(board, playerId, sv, usedE);
-    if l > len, len = l; end
 end
 end
 
-function len = dfsRoadLocal(board, playerId, v, usedEdges)
-len = 0;
-for e = board.vertices(v).adjEdgeIds
-    if board.edges(e).owner ~= playerId, continue; end
-    if usedEdges(e), continue; end
-    vPair = board.edges(e).vertexIds;
-    nv = vPair(vPair ~= v); if isempty(nv), continue; end
-    nv = nv(1);
-    nOwner = board.vertices(nv).owner;
-    if nOwner ~= 0 && nOwner ~= playerId
-        if 1 > len, len = 1; end
-    else
-        usedEdges(e) = true;
-        sl = 1 + dfsRoadLocal(board, playerId, nv, usedEdges);
-        usedEdges(e) = false;
-        if sl > len, len = sl; end
-    end
-end
-end

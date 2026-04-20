@@ -38,6 +38,9 @@ function varargout = catan_core(command, varargin)
         case 'computevp',                varargout{1} = computeVP(varargin{:});
         case 'autorobber',               varargout{1} = autoRobber(varargin{:});
         case 'advancedevcards',          varargout{1} = advanceDevCards(varargin{:});
+        case 'longestroadlen',           varargout{1} = computeLongestRoadLen(varargin{:});
+        case 'traderates',               varargout{1} = getTradeRates(varargin{:});
+        case 'canbuildroad',             varargout{1} = canBuildRoadAtEdge(varargin{:});
         case 'enumeraterobberactions',   varargout{1} = enumerateRobberActions(varargin{:});
         case 'rungame',                  runGame();
         otherwise
@@ -52,15 +55,15 @@ function runGame()
 %
 % Player types: 'random' | 'heuristic' | 'monte_carlo' | 'mcts' | 'live'
 
-PARAMS.players        = {'monte_carlo', 'heuristic', 'random'};
+PARAMS.players        = {'random', 'heuristic', 'monte_carlo', 'mcts'};
 PARAMS.pauseAfterMove = true;
 PARAMS.rngSeed        = 0;  % 0 = random board each run; set a fixed int for reproducibility
 PARAMS.winVP          = 10;
 PARAMS.maxTurns       = 300;
 PARAMS.showViz        = true;
-PARAMS.mc.rolloutCount  = 50;
-PARAMS.mc.rolloutHorizon  = 10;
-PARAMS.mc.selfRolloutPolicy = 'heuristic';
+PARAMS.mc.rolloutCount  = 30;
+PARAMS.mc.rolloutHorizon  = 35;
+PARAMS.mc.selfRolloutPolicy = 'random';
 PARAMS.mc.opponentRolloutPolicy = 'random';
 
 config               = defaultConfig();
@@ -131,19 +134,20 @@ config.enforceDistanceRule    = true;
 config.rngSeed                = 0;  % 0 = random; fixed int = reproducible
 config.pauseAfterMove         = false;
 config.showViz                = true;
-config.rolloutCount           = 15;
-config.rolloutHorizon         = 25;
-config.mc.selfRolloutPolicy     = 'heuristic';
+config.rolloutCount           = 50;
+config.rolloutHorizon         = 35;
+config.mc.selfRolloutPolicy     = 'random';
 config.mc.opponentRolloutPolicy = 'random';
 config.verbose                = true;
+config.allowTrade             = true;
 config.heuristic.wExpectedProduction = 3.0;
 config.heuristic.wResourceNeed       = 1.5;
 config.heuristic.wDiversity          = 1.0;
 config.heuristic.wBlocking           = 0.2;
 config.heuristic.wRoad               = 1.8;
 config.heuristic.wCity               = 2.5;
-config.mcts.C                 = sqrt(2);
-config.mcts.depth             = 2;
+config.mcts.C                 = sqrt(3);
+config.mcts.depth             = 5;
 end
 
 %% ========================= GAME LOOP =========================
@@ -608,15 +612,17 @@ if ~state.devCardPlayedThisTurn
 end
 
 % Maritime trading
-rates = getTradeRates(state, playerId, config);
-rNames = config.resourceNames;
-for ri = 1:numel(rNames)
-    if player.resources(ri) >= rates(ri)
-        for rj = 1:numel(rNames)
-            if ri == rj, continue; end
-            a = makeAction('maritime_trade');
-            a.resourceType = rNames{ri}; a.resource2 = rNames{rj};
-            legalActions(end+1) = a; %#ok<AGROW>
+if ~isfield(config,'allowTrade') || config.allowTrade
+    rates = getTradeRates(state, playerId, config);
+    rNames = config.resourceNames;
+    for ri = 1:numel(rNames)
+        if player.resources(ri) >= rates(ri)
+            for rj = 1:numel(rNames)
+                if ri == rj, continue; end
+                a = makeAction('maritime_trade');
+                a.resourceType = rNames{ri}; a.resource2 = rNames{rj};
+                legalActions(end+1) = a; %#ok<AGROW>
+            end
         end
     end
 end

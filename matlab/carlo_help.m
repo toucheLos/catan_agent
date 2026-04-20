@@ -1,0 +1,85 @@
+function varargout = carlo_help(command, varargin)
+%CARLO_HELP  Shared rollout utilities for MC and MCTS agents.
+%
+%   state = carlo_help('applypolicy',    state, playerId, policyName, config)
+%   u     = carlo_help('rolloututility', state, rootPlayer, vpWeight)
+
+switch lower(command)
+    case 'applypolicy',    varargout{1} = applyRolloutPolicy(varargin{:});
+    case 'rolloututility', varargout{1} = rolloutUtility(varargin{:});
+    otherwise
+        error('Unknown carlo_help command: %s', command);
+end
+end
+
+% =========================================================================
+
+function state = applyRolloutPolicy(state, playerId, policyName, config)
+state.devCardPlayedThisTurn = false;
+actionCap = 30;
+for step = 1:actionCap
+    legalActions = catan_core('enumerateLegalActions', state, playerId, config);
+    switch lower(policyName)
+        case 'heuristic'
+            action = agent_heuristic(state, legalActions, playerId, config);
+        otherwise
+            action = agent_random(state, legalActions, playerId, config);
+    end
+    if ~catan_core('isLegalAction', action, legalActions)
+        action = catan_core('makeAction', 'pass', 0);
+    end
+    if strcmp(action.type,'pass') && state.freeRoads == 0
+        return;
+    end
+    state = catan_core('applyAction', state, playerId, action, config);
+    [done, winnerId] = catan_core('checkTerminal', state, config);
+    state.isTerminal = done;
+    state.winnerId   = winnerId;
+    if done, return; end
+end
+end
+
+% =========================================================================
+
+function u = rolloutUtility(state, rootPlayer, vpWeight)
+myVP     = state.players(rootPlayer).victoryPoints;
+allVP    = [state.players.victoryPoints];
+oppIdx   = setdiff(1:numel(allVP), rootPlayer);
+maxOppVP = isempty(oppIdx) * myVP + ~isempty(oppIdx) * max(allVP(oppIdx));
+vpLead   = myVP - maxOppVP;
+
+prodScore = 0;
+for v = 1:numel(state.board.vertices)
+    if state.board.vertices(v).owner == rootPlayer
+        mult = 1 + state.board.vertices(v).isCity;
+        for h = state.board.vertices(v).adjHexIds
+            prodScore = prodScore + mult * catan_core('diceProbability', state.board.hexes(h).diceNumber);
+        end
+    end
+end
+
+% Count valid settlement spots reachable by player's road network
+expansionScore = 0;
+for v = 1:numel(state.board.vertices)
+    vtx = state.board.vertices(v);
+    if vtx.owner ~= 0, continue; end
+    hasRoad = false;
+    for e = vtx.adjEdgeIds
+        if state.board.edges(e).owner == rootPlayer, hasRoad = true; break; end
+    end
+    if ~hasRoad, continue; end
+    distOk = true;
+    for nv = vtx.adjVertexIds
+        if state.board.vertices(nv).owner ~= 0, distOk = false; break; end
+    end
+    if distOk, expansionScore = expansionScore + 1; end
+end
+
+winBonus = 0;
+if state.isTerminal
+    if     state.winnerId == rootPlayer, winBonus =  1.0;
+    elseif state.winnerId ~= 0,          winBonus = -1.0;
+    end
+end
+u = winBonus + vpWeight * vpLead + 0.05 * prodScore + 0.02 * expansionScore;
+end

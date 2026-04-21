@@ -7,7 +7,7 @@ function action = agent_mcts(state, legalActions, playerId, config)
 numActions = numel(legalActions);
 if numActions == 1, action = legalActions(1); return; end
 
-C     = config.mcts.C;
+C = config.mcts.C;
 depth = config.mcts.depth;
 
 totalBudget = config.rolloutCount * numActions;
@@ -42,7 +42,7 @@ function u = mctsDeepRollout(state, candidate, actingPlayer, rootPlayer, depth, 
 state = catan_core('applyAction', state, actingPlayer, candidate, config);
 state.placementPhase = false;
 
-[done, wId]      = catan_core('checkTerminal', state, config);
+[done, wId] = catan_core('checkTerminal', state, config);
 state.isTerminal = done; state.winnerId = wId;
 
 if ~state.isTerminal
@@ -83,9 +83,9 @@ end
 
 for t = 1:(rolloutHorizon - depth)
     if state.isTerminal, break; end
-    cp    = state.currentPlayer;
+    cp = state.currentPlayer;
     state = catan_core('advanceDevCards', state, cp);
-    roll  = catan_core('rollDice');
+    roll = catan_core('rollDice');
     state.lastRoll = roll;
     if roll == 7
         state = catan_core('autoRobber', state, cp, config);

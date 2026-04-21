@@ -61,7 +61,7 @@ PARAMS.rngSeed        = 0;  % 0 = random board each run; set a fixed int for rep
 PARAMS.winVP          = 10;
 PARAMS.maxTurns       = 300;
 PARAMS.showViz        = true;
-PARAMS.mc.rolloutCount  = 30;
+PARAMS.mc.rolloutCount  = 50;
 PARAMS.mc.rolloutHorizon  = 35;
 PARAMS.mc.selfRolloutPolicy = 'random';
 PARAMS.mc.opponentRolloutPolicy = 'random';
@@ -182,6 +182,12 @@ history.logs  = {};
 while ~state.isTerminal
 
     playerId = state.currentPlayer;
+
+    % Agent inspection hook
+    if isfield(config,'inspectTurn') && ~isempty(config.inspectTurn) && state.turnIndex == config.inspectTurn
+        inspect_agents(state, playerId, config);
+        input('  [Inspector: Press Enter to continue]', 's');
+    end
 
     % Transfer new dev cards to playable at start of player's turn
     state = advanceDevCards(state, playerId);

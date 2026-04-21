@@ -9,7 +9,7 @@ PARAMS.numGames       = 50;        % games per matchup
 PARAMS.outputDir      = 'outputs'; % relative to working directory
 PARAMS.baseSeed       = 1000;      % rngSeed = baseSeed + per-game offset
 PARAMS.agents         = {'random','heuristic','monte_carlo','mcts'};
-PARAMS.playerCounts   = [2, 3, 4];
+PARAMS.playerCounts   = [2, 4];
 PARAMS.rolloutCount   = 15;
 PARAMS.rolloutHorizon = 25;
 %% =========================================================
@@ -38,9 +38,6 @@ for pcIdx = 1:numel(PARAMS.playerCounts)
     fprintf('========================================\n');
 
     matchups = generateMatchups(agents, pc);
-    if pc == 4
-        matchups = prioritizeMatchups4(matchups, agents);
-    end
     nM = numel(matchups);
 
     mSumm = initMatchupSummaries(matchups, nA, nM);
@@ -67,7 +64,9 @@ for pcIdx = 1:numel(PARAMS.playerCounts)
             raw.playerAgents = matchups{m};
             raw.playerVPs    = vps;
             raw.totalTurns   = totalTurns;
+            raw.runId        = timestamp;
             allRawResults{end+1} = raw; %#ok<AGROW>
+            appendGameResult(raw, outDir);
         end
     end
 
@@ -85,58 +84,19 @@ end
 
 %% ===== MATCHUP GENERATION =====
 
-function matchups = generateMatchups(agents, k)
-% All k-multiset combinations of agents (non-decreasing index sequences)
-n      = numel(agents);
-idxMat = multisetCombinations(n, k);
-matchups = cell(size(idxMat, 1), 1);
-for i = 1:size(idxMat, 1)
-    matchups{i} = agents(idxMat(i, :));
-end
-end
-
-function C = multisetCombinations(n, k)
-% All non-decreasing length-k sequences from 1:n (combinations with repetition)
-if k == 1
-    C = (1:n)';
-    return;
-end
-C = [];
-for v = 1:n
-    sub = multisetCombinationsFrom(n, k-1, v);
-    C   = [C; repmat(v, size(sub,1), 1), sub]; %#ok<AGROW>
-end
-end
-
-function C = multisetCombinationsFrom(n, k, minVal)
-if k == 1
-    C = (minVal:n)';
-    return;
-end
-C = [];
-for v = minVal:n
-    sub = multisetCombinationsFrom(n, k-1, v);
-    C   = [C; repmat(v, size(sub,1), 1), sub]; %#ok<AGROW>
-end
-end
-
-function matchups = prioritizeMatchups4(matchups, agents)
-% Sort: all-different first (score 0), all-same second (score 1), rest last (score 2)
-nM     = numel(matchups);
-nA     = numel(agents);
-scores = zeros(nM, 1);
-for i = 1:nM
-    u = unique(matchups{i});
-    if numel(u) == nA
-        scores(i) = 0;
-    elseif numel(u) == 1
-        scores(i) = 1;
-    else
-        scores(i) = 2;
+function matchups = generateMatchups(agents, pc)
+nA = numel(agents);
+if pc == 2
+    % All unique pairs (no self-play)
+    pairs = nchoosek(1:nA, 2);
+    matchups = cell(size(pairs, 1), 1);
+    for i = 1:size(pairs, 1)
+        matchups{i} = agents(pairs(i, :));
     end
+else
+    % Full roster in one matchup (4-player)
+    matchups = {agents};
 end
-[~, ord] = sort(scores, 'stable');
-matchups  = matchups(ord);
 end
 
 %% ===== CONFIG & GAME RUNNER =====
@@ -146,6 +106,7 @@ cfg                          = catan_core('defaultConfig');
 cfg.showViz                  = false;
 cfg.pauseAfterMove           = false;
 cfg.verbose                  = false;
+cfg.inspectTurn              = [];
 cfg.rngSeed                  = PARAMS.baseSeed + (pcIdx-1)*100000 + (m-1)*1000 + g;
 cfg.rolloutCount             = PARAMS.rolloutCount;
 cfg.rolloutHorizon           = PARAMS.rolloutHorizon;
@@ -156,15 +117,32 @@ end
 function [winnerId, vps, totalTurns, isError] = runOneGame(agentFns, cfg, playerNames)
 isError    = false;
 winnerId   = 0;
-vps        = zeros(1, numel(agentFns));
+nP         = numel(agentFns);
+vps        = zeros(1, nP);
 totalTurns = NaN;
+
+% Randomize seating order each game
+perm              = randperm(nP);
+agentFnsShuf      = agentFns(perm);
+playerNamesShuf   = playerNames(perm);
+invPerm           = zeros(1, nP);
+invPerm(perm)     = 1:nP;
+
 try
-    history    = catan_core('simulateGame', agentFns, cfg, playerNames);
+    history    = catan_core('simulateGame', agentFnsShuf, cfg, playerNamesShuf);
     fs         = history.finalState;
     totalTurns = fs.turnIndex;
-    winnerId   = fs.winnerId;
-    for p = 1:numel(agentFns)
-        vps(p) = catan_core('computeVP', fs, p);
+
+    % VPs per shuffled seat → unscramble to original agent order
+    vpsSeat = zeros(1, nP);
+    for p = 1:nP
+        vpsSeat(p) = catan_core('computeVP', fs, p);
+    end
+    vps = vpsSeat(invPerm);
+
+    % Winner seat (shuffled) → original agent index
+    if fs.winnerId > 0
+        winnerId = invPerm(fs.winnerId);
     end
 catch e
     fprintf('  ERROR in game: %s\n', e.message);
@@ -562,6 +540,37 @@ try
     end
 catch
 end
+end
+
+%% ===== INCREMENTAL SAVE =====
+
+function appendGameResult(raw, outDir)
+if ~exist(outDir, 'dir'), mkdir(outDir); end
+fpath = fullfile(outDir, 'tournament_all_results.csv');
+isNew = ~exist(fpath, 'file');
+fid   = fopen(fpath, 'a');
+if fid == -1
+    warning('tournament:appendGameResult', 'Could not open %s for writing.', fpath);
+    return;
+end
+if isNew
+    fprintf(fid, 'run_id,player_count,matchup,game_index,winner_agent,p1_agent,p1_vp,p2_agent,p2_vp,p3_agent,p3_vp,p4_agent,p4_vp,total_turns\n');
+end
+nP = numel(raw.playerAgents);
+pA = [raw.playerAgents, {'','','',''}];
+pV = [raw.playerVPs,    zeros(1, 4-nP)];
+vpStr = cell(1, 4);
+for p = 1:4
+    if p <= nP, vpStr{p} = sprintf('%d', pV(p));
+    else,       vpStr{p} = ''; end
+end
+turnStr = '';
+if ~isnan(raw.totalTurns), turnStr = sprintf('%d', raw.totalTurns); end
+fprintf(fid, '%s,%d,%s,%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n', ...
+    raw.runId, raw.pc, raw.matchup, raw.gameIdx, raw.winnerAgent, ...
+    pA{1}, vpStr{1}, pA{2}, vpStr{2}, ...
+    pA{3}, vpStr{3}, pA{4}, vpStr{4}, turnStr);
+fclose(fid);
 end
 
 %% ===== AGENT RESOLVER =====

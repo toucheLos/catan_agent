@@ -8,7 +8,8 @@ function tournament(numGames)
 PARAMS.numGames       = 50;        % games per matchup
 PARAMS.outputDir      = 'outputs'; % relative to working directory
 PARAMS.baseSeed       = 1000;      % rngSeed = baseSeed + per-game offset
-PARAMS.agents         = {'random','heuristic','monte_carlo','mcts'};
+PARAMS.agents2p       = {'heuristic','monte_carlo','mcts'};
+PARAMS.agents4p       = {'random','heuristic','monte_carlo','mcts'};
 PARAMS.playerCounts   = [2, 4];
 PARAMS.rolloutCount   = 15;
 PARAMS.rolloutHorizon = 25;
@@ -19,10 +20,7 @@ if nargin >= 1
 end
 
 timestamp = datestr(now, 'yyyymmdd_HHMMSS');
-outDir    = PARAMS.outputDir;
-agents    = PARAMS.agents;
-nA        = numel(agents);
-
+outDir    = fullfile(fileparts(mfilename('fullpath')), PARAMS.outputDir);
 if ~exist(outDir, 'dir')
     mkdir(outDir);
 end
@@ -32,6 +30,13 @@ pcDataArr     = cell(numel(PARAMS.playerCounts), 1);
 
 for pcIdx = 1:numel(PARAMS.playerCounts)
     pc = PARAMS.playerCounts(pcIdx);
+
+    if pc == 2
+        agents = PARAMS.agents2p;
+    else
+        agents = PARAMS.agents4p;
+    end
+    nA = numel(agents);
 
     fprintf('\n========================================\n');
     fprintf('  PLAYER COUNT: %d\n', pc);
@@ -110,7 +115,7 @@ cfg.inspectTurn              = [];
 cfg.rngSeed                  = PARAMS.baseSeed + (pcIdx-1)*100000 + (m-1)*1000 + g;
 cfg.rolloutCount             = PARAMS.rolloutCount;
 cfg.rolloutHorizon           = PARAMS.rolloutHorizon;
-cfg.mc.selfRolloutPolicy     = 'heuristic';
+cfg.mc.selfRolloutPolicy     = 'random';
 cfg.mc.opponentRolloutPolicy = 'random';
 end
 

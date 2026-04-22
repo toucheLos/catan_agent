@@ -8,8 +8,8 @@ bestValue  = -inf;
 bestAction = catan_core('makeAction', 'pass', 0);
 
 for i = 1:numel(legalActions)
-    candidate  = legalActions(i);
-    totalValue = 0;
+    candidate = legalActions(i);
+    vals = zeros(1, rolloutCount);
 
     parfor r = 1:rolloutCount
         s = catan_core('applyAction', state, playerId, candidate, config);
@@ -51,10 +51,10 @@ for i = 1:numel(legalActions)
             end
         end
 
-        totalValue = totalValue + carlo_help('rolloututility', s, playerId, 0.25);
+        vals(r) = carlo_help('rolloututility', s, playerId, 0.25);
     end
 
-    value = totalValue / rolloutCount;
+    value = sum(vals) / rolloutCount;
     if value > bestValue
         bestValue  = value;
         bestAction = candidate;

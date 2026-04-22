@@ -61,9 +61,9 @@ PARAMS.rngSeed        = 0;  % 0 = random board each run; set a fixed int for rep
 PARAMS.winVP          = 10;
 PARAMS.maxTurns       = 300;
 PARAMS.showViz        = true;
-PARAMS.mc.rolloutCount  = 50;
-PARAMS.mc.rolloutHorizon  = 35;
-PARAMS.mc.selfRolloutPolicy = 'random';
+PARAMS.mc.rolloutCount  = 15;
+PARAMS.mc.rolloutHorizon  = 15;
+PARAMS.mc.selfRolloutPolicy = 'heuristic';
 PARAMS.mc.opponentRolloutPolicy = 'random';
 
 config               = defaultConfig();
@@ -135,7 +135,7 @@ config.rngSeed                = 0;  % 0 = random; fixed int = reproducible
 config.pauseAfterMove         = false;
 config.showViz                = true;
 config.rolloutCount           = 50;
-config.rolloutHorizon         = 35;
+config.rolloutHorizon         = 15;
 config.mc.selfRolloutPolicy     = 'random';
 config.mc.opponentRolloutPolicy = 'random';
 config.verbose                = true;
@@ -146,8 +146,10 @@ config.heuristic.wDiversity          = 1.0;
 config.heuristic.wBlocking           = 0.2;
 config.heuristic.wRoad               = 1.8;
 config.heuristic.wCity               = 2.5;
-config.mcts.C                 = sqrt(3);
-config.mcts.depth             = 5;
+config.mcts.C                 = sqrt(2);
+config.mcts.totalBudget       = 300;
+% depth = rolloutHorizon means all simulated turns use the guided policy — maximizes signal quality at the cost of slightly slower rollouts.
+config.mcts.depth             = config.rolloutHorizon;
 end
 
 %% ========================= GAME LOOP =========================
@@ -1787,7 +1789,22 @@ portTypes = {'3to1','3to1','3to1','3to1', ...
              'wood2to1','brick2to1','sheep2to1','wheat2to1','ore2to1'};
 portTypes = portTypes(randperm(9));
 nPorts    = min(9, numel(coastEdgeIds));
-portEdges = coastEdgeIds(randperm(numel(coastEdgeIds), nPorts));
+% Sort coastal edges by angle around board center, then pick evenly spaced
+% ones so ports are distributed around the perimeter instead of clustering.
+coastMidpoints = zeros(numel(coastEdgeIds), 2);
+for ci = 1:numel(coastEdgeIds)
+    eid = coastEdgeIds(ci);
+    p1 = vertexPos(edgeList(eid).vertexIds(1), :);
+    p2 = vertexPos(edgeList(eid).vertexIds(2), :);
+    coastMidpoints(ci,:) = (p1 + p2) / 2;
+end
+angles_coast = atan2(coastMidpoints(:,2), coastMidpoints(:,1));
+[~, sortIdx] = sort(angles_coast);
+coastEdgeIds = coastEdgeIds(sortIdx);
+step = numel(coastEdgeIds) / nPorts;
+offset = randi(round(step));
+pickIdx = mod(round((0:nPorts-1)*step + offset - 1), numel(coastEdgeIds)) + 1;
+portEdges = coastEdgeIds(pickIdx);
 for i = 1:nPorts
     eid  = portEdges(i);
     pType = portTypes{i};

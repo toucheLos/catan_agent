@@ -1,18 +1,18 @@
 function varargout = carlo_help(command, varargin)
 %CARLO_HELP  Shared rollout utilities for MC and MCTS agents.
 %
-%   state = carlo_help('applypolicy',    state, playerId, policyName, config)
-%   u     = carlo_help('rolloututility', state, rootPlayer, vpWeight)
+%   state = carlo_help('applypolicy', state, playerId, policyName, config)
+%   u = carlo_help('rolloututility', state, rootPlayer, vpWeight)
 
 switch lower(command)
-    case 'applypolicy',    varargout{1} = applyRolloutPolicy(varargin{:});
+    case 'applypolicy', varargout{1} = applyRolloutPolicy(varargin{:});
     case 'rolloututility', varargout{1} = rolloutUtility(varargin{:});
     otherwise
         error('Unknown carlo_help command: %s', command);
 end
 end
 
-% =========================================================================
+% ===================
 
 function state = applyRolloutPolicy(state, playerId, policyName, config)
 state.devCardPlayedThisTurn = false;
@@ -39,7 +39,7 @@ for step = 1:actionCap
 end
 end
 
-% =========================================================================
+% =================
 
 function u = rolloutUtility(state, rootPlayer, vpWeight)
 myVP     = state.players(rootPlayer).victoryPoints;
@@ -58,7 +58,7 @@ for v = 1:numel(state.board.vertices)
     end
 end
 
-% Count valid settlement spots reachable by player's road network
+% Count valid settlement spots reachable by players road network
 expansionScore = 0;
 for v = 1:numel(state.board.vertices)
     vtx = state.board.vertices(v);

@@ -52,29 +52,27 @@ end
 action = bestAction;
 end
 
-%% =========================================================================
 %  Settlement
-%% =========================================================================
 
 function score = scoreSettlement(state, playerId, vertexId, config)
 player = state.players(playerId);
 vertex = state.board.vertices(vertexId);
 
-wProd   = 3.0; wNeed = 1.5; wDiv = 1.0; wBlock = 0.2;
+wProd = 3.0; wNeed = 1.5; wDiv = 1.0; wBlock = 0.2;
 if isfield(config,'heuristic')
     hw = config.heuristic;
-    if isfield(hw,'wExpectedProduction'), wProd  = hw.wExpectedProduction; end
-    if isfield(hw,'wResourceNeed'),       wNeed  = hw.wResourceNeed;       end
-    if isfield(hw,'wDiversity'),          wDiv   = hw.wDiversity;          end
-    if isfield(hw,'wBlocking'),           wBlock = hw.wBlocking;           end
+    if isfield(hw,'wExpectedProduction'), wProd = hw.wExpectedProduction; end
+    if isfield(hw,'wResourceNeed'), wNeed = hw.wResourceNeed; end
+    if isfield(hw,'wDiversity'), wDiv = hw.wDiversity; end
+    if isfield(hw,'wBlocking'), wBlock = hw.wBlocking; end
 end
 
 prodScore = 0; needScore = 0;
 producedTypes = false(1, numel(config.resourceNames));
 
 for h = vertex.adjHexIds
-    hex  = state.board.hexes(h);
-    p    = catan_core('diceProbability', hex.diceNumber);
+    hex = state.board.hexes(h);
+    p = catan_core('diceProbability', hex.diceNumber);
     rIdx = find(strcmp(config.resourceNames, hex.resourceType), 1);
     if isempty(rIdx), continue; end
     prodScore = prodScore + p;
@@ -382,9 +380,7 @@ needFactor = config.buildCosts.settlement(rIdx) + config.buildCosts.road(rIdx) +
 score = total * 0.5 * max(0.5, needFactor);
 end
 
-%% =========================================================================
 %  Helpers
-%% =========================================================================
 
 function tf = canAffordCheck(resources, cost)
 tf = all(resources >= cost);

@@ -1,10 +1,10 @@
 function action = agent_montecarlo(state, legalActions, playerId, config)
 %AGENT_MONTECARLO  Flat Monte Carlo rollouts over legal actions.
 
-rolloutCount   = config.rolloutCount;
+rolloutCount = config.rolloutCount;
 rolloutHorizon = config.rolloutHorizon;
 
-bestValue  = -inf;
+bestValue = -inf;
 bestAction = catan_core('makeAction', 'pass', 0);
 
 for i = 1:numel(legalActions)
@@ -23,7 +23,7 @@ for i = 1:numel(legalActions)
         end
         if ~s.isTerminal
             s.currentPlayer = mod(playerId, config.numPlayers) + 1;
-            s.turnIndex     = s.turnIndex + 1;
+            s.turnIndex = s.turnIndex + 1;
         end
 
         for t = 1:rolloutHorizon
@@ -45,7 +45,7 @@ for i = 1:numel(legalActions)
             s = carlo_help('applypolicy', s, cp, policy, config);
             if ~s.isTerminal
                 s.currentPlayer = mod(cp, config.numPlayers) + 1;
-                s.turnIndex     = s.turnIndex + 1;
+                s.turnIndex = s.turnIndex + 1;
                 [done, wId]  = catan_core('checkTerminal', s, config);
                 s.isTerminal = done; s.winnerId = wId;
             end

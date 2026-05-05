@@ -81,6 +81,5 @@ if state.isTerminal
     elseif state.winnerId ~= 0, winBonus = -1.0;
     end
 end
-% Total Utility
 u = winBonus + vpWeight * vpLead + 0.05 * prodScore + 0.02 * expansionScore;
 end
